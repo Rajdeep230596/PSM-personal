@@ -4,12 +4,7 @@ const chapters = [...document.querySelectorAll(".chapter")];
 const progressBar = document.getElementById("progress-bar");
 const chapterIndex = document.getElementById("chapter-index");
 const nav = document.getElementById("nav");
-const wa = document.querySelector(".wa");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-const SOURCE_W = 1280;
-const SOURCE_H = 720;
-const MARK = { x: 1126, y: 566, w: 68, h: 68 };
 
 let scrubQueued = false;
 
@@ -62,37 +57,6 @@ function onScroll() {
   if (!reduceMotion) paintChapters(progress);
   nav.classList.toggle("is-solid", story.getBoundingClientRect().bottom < window.innerHeight * 0.9);
   scrub();
-  placeWhatsApp();
-}
-
-function placeWhatsApp() {
-  const viewW = window.innerWidth;
-  const viewH = window.innerHeight;
-  const scale = Math.max(viewW / SOURCE_W, viewH / SOURCE_H);
-  const offsetX = (viewW - SOURCE_W * scale) / 2;
-  const offsetY = (viewH - SOURCE_H * scale) / 2;
-  const markLeft = offsetX + MARK.x * scale;
-  const markTop = offsetY + MARK.y * scale;
-  const markSize = Math.max(MARK.w, MARK.h) * scale;
-  const cx = markLeft + (MARK.w * scale) / 2;
-  const cy = markTop + (MARK.h * scale) / 2;
-  const filmVisible = story.getBoundingClientRect().bottom > viewH * 0.45;
-  const onScreen = cx > 24 && cy > 24 && cx < viewW - 24 && cy < viewH - 24;
-  if (filmVisible && onScreen) {
-    wa.style.right = "auto";
-    wa.style.bottom = "auto";
-    wa.style.width = `${markSize}px`;
-    wa.style.height = `${markSize}px`;
-    wa.style.left = `${cx - markSize / 2}px`;
-    wa.style.top = `${cy - markSize / 2}px`;
-    return;
-  }
-  wa.style.width = "";
-  wa.style.height = "";
-  wa.style.left = "auto";
-  wa.style.top = "auto";
-  wa.style.right = "1.25rem";
-  wa.style.bottom = "1.25rem";
 }
 
 function unlockFilm() {
@@ -120,10 +84,8 @@ window.addEventListener("scroll", onScroll, { passive: true });
 onScroll();
 
 window.addEventListener("resize", () => {
-  placeWhatsApp();
   if (!reduceMotion) onScroll();
 });
-placeWhatsApp();
 
 const toggle = document.querySelector(".nav-toggle");
 toggle.addEventListener("click", () => {
