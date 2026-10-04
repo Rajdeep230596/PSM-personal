@@ -4,7 +4,12 @@ const chapters = [...document.querySelectorAll(".chapter")];
 const progressBar = document.getElementById("progress-bar");
 const chapterIndex = document.getElementById("chapter-index");
 const nav = document.getElementById("nav");
+const wa = document.querySelector(".wa");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const SOURCE_W = 1280;
+const SOURCE_H = 720;
+const MARK = { x: 1126, y: 566, w: 68, h: 68 };
 
 let scrubQueued = false;
 
@@ -16,6 +21,13 @@ function storyProgress() {
   const total = story.offsetHeight - window.innerHeight;
   if (total <= 0) return 0;
   return clamp(-story.getBoundingClientRect().top / total, 0, 1);
+}
+
+function filmProgress() {
+  const servicesTop =
+    document.getElementById("services").getBoundingClientRect().top + window.scrollY;
+  if (servicesTop <= 0) return 1;
+  return clamp(window.scrollY / servicesTop, 0, 1);
 }
 
 function paintChapters(progress) {
@@ -30,7 +42,12 @@ function paintChapters(progress) {
     chapter.style.opacity = String(opacity);
     chapter.style.transform = `translateY(${(1 - opacity) * 22}px)`;
     chapter.classList.toggle("is-on", opacity > 0.45);
-    if (opacity > 0.45) active = index + 1;
+    if (opacity > 0.45) {
+      active = index + 1;
+      showPops(chapter, true);
+    } else if (opacity < 0.08) {
+      showPops(chapter, false);
+    }
   });
   chapterIndex.textContent = `0${active}  —  04`;
 }
@@ -41,7 +58,7 @@ function scrub() {
   scrubQueued = true;
   requestAnimationFrame(() => {
     scrubQueued = false;
-    const next = storyProgress() * Math.max(film.duration - 0.04, 0);
+    const next = filmProgress() * Math.max(film.duration - 0.04, 0);
     if (Math.abs(next - film.currentTime) < 1 / 24) return;
     try {
       film.currentTime = next;
@@ -53,10 +70,42 @@ function scrub() {
 
 function onScroll() {
   const progress = storyProgress();
-  progressBar.style.width = `${progress * 100}%`;
+  progressBar.style.width = `${filmProgress() * 100}%`;
   if (!reduceMotion) paintChapters(progress);
   nav.classList.toggle("is-solid", story.getBoundingClientRect().bottom < window.innerHeight * 0.9);
   scrub();
+  placeWhatsApp();
+}
+
+function placeWhatsApp() {
+  const viewW = window.innerWidth;
+  const viewH = window.innerHeight;
+  const scale = Math.max(viewW / SOURCE_W, viewH / SOURCE_H);
+  const offsetX = (viewW - SOURCE_W * scale) / 2;
+  const offsetY = (viewH - SOURCE_H * scale) / 2;
+  const markLeft = offsetX + MARK.x * scale;
+  const markTop = offsetY + MARK.y * scale;
+  const markSize = Math.max(MARK.w, MARK.h) * scale;
+  const cx = markLeft + (MARK.w * scale) / 2;
+  const cy = markTop + (MARK.h * scale) / 2;
+  const aboutTop = document.getElementById("about").getBoundingClientRect().top;
+  const filmVisible = aboutTop > viewH * 0.85;
+  const onScreen = cx > 24 && cy > 24 && cx < viewW - 24 && cy < viewH - 24;
+  if (filmVisible && onScreen) {
+    wa.style.right = "auto";
+    wa.style.bottom = "auto";
+    wa.style.width = `${markSize}px`;
+    wa.style.height = `${markSize}px`;
+    wa.style.left = `${cx - markSize / 2}px`;
+    wa.style.top = `${cy - markSize / 2}px`;
+    return;
+  }
+  wa.style.width = "";
+  wa.style.height = "";
+  wa.style.left = "auto";
+  wa.style.top = "auto";
+  wa.style.right = "1.25rem";
+  wa.style.bottom = "1.25rem";
 }
 
 function unlockFilm() {
@@ -84,8 +133,10 @@ window.addEventListener("scroll", onScroll, { passive: true });
 onScroll();
 
 window.addEventListener("resize", () => {
+  placeWhatsApp();
   if (!reduceMotion) onScroll();
 });
+placeWhatsApp();
 
 const toggle = document.querySelector(".nav-toggle");
 toggle.addEventListener("click", () => {
@@ -113,4 +164,54 @@ form.addEventListener("submit", (event) => {
   const body = `Name: ${name}\nEmail: ${email}\n\n${message}`;
   window.location.href = `mailto:psminfinity@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   status.textContent = "Your email app is opening.";
+});
+
+function markPops(elements) {
+  elements.forEach((element, index) => {
+    element.classList.add("pop");
+    element.style.setProperty("--pop-delay", `${index * 110}ms`);
+  });
+}
+
+function showPops(root, visible) {
+  root.querySelectorAll(".pop").forEach((element) => element.classList.toggle("is-in", visible));
+}
+
+markPops([...document.querySelectorAll(".chapter")].flatMap((chapter) => [...chapter.children]));
+if (!reduceMotion) paintChapters(storyProgress());
+
+[
+  [
+    document.querySelector(".services"),
+    [
+      ...document.querySelectorAll(".services .panel-head > *"),
+      ...document.querySelectorAll(".services .service-list > li"),
+    ],
+  ],
+  [
+    document.querySelector(".about"),
+    [
+      ...document.querySelectorAll(".about-copy > *"),
+      ...document.querySelectorAll(".about-side > .kicker"),
+      ...document.querySelectorAll(".timeline > li"),
+    ],
+  ],
+  [
+    document.querySelector(".contact"),
+    [
+      ...document.querySelectorAll(".contact .panel-head > *"),
+      ...document.querySelectorAll(".form > label"),
+      document.querySelector(".submit"),
+      ...document.querySelectorAll(".details > div"),
+    ],
+  ],
+  [document.querySelector(".footer"), [...document.querySelectorAll(".footer > *")]],
+].forEach(([section, bits]) => {
+  markPops(bits.filter(Boolean));
+  if (reduceMotion) return;
+  const observer = new IntersectionObserver(
+    ([entry]) => showPops(section, entry.isIntersecting),
+    { threshold: 0.22 }
+  );
+  observer.observe(section);
 });

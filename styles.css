@@ -262,9 +262,30 @@ h2 {
 .sheet {
   position: relative;
   z-index: 2;
+  background: transparent;
+}
+
+.services {
+  background: linear-gradient(
+    180deg,
+    rgba(9, 10, 12, 0.18) 0%,
+    rgba(9, 10, 12, 0.42) 55%,
+    var(--sheet) 100%
+  );
+}
+
+.about {
   background:
     radial-gradient(1200px 500px at 10% -10%, rgba(214, 186, 120, 0.08), transparent 55%),
     var(--sheet);
+}
+
+.contact,
+.footer {
+  background: var(--sheet);
+}
+
+.about {
   border-top: 1px solid var(--line);
 }
 
@@ -571,6 +592,31 @@ h2 {
   }
 }
 
+.pop {
+  opacity: 0;
+  transform: translateY(1.15rem) scale(0.98);
+}
+
+.pop.is-in {
+  animation: pop-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--pop-delay, 0ms);
+}
+
+@keyframes pop-up {
+  0% {
+    opacity: 0;
+    transform: translateY(1.35rem) scale(0.96);
+  }
+  65% {
+    opacity: 1;
+    transform: translateY(-0.2rem) scale(1.015);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -596,5 +642,11 @@ h2 {
     flex-direction: column;
     justify-content: flex-end;
     padding: 12vh 0;
+  }
+
+  .pop {
+    opacity: 1;
+    transform: none;
+    animation: none;
   }
 }
