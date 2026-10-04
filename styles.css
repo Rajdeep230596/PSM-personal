@@ -76,8 +76,8 @@ textarea {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(8, 8, 10, 0.78) 0%, rgba(8, 8, 10, 0.38) 46%, rgba(8, 8, 10, 0.2) 100%),
-    linear-gradient(180deg, rgba(8, 8, 10, 0.55) 0%, rgba(8, 8, 10, 0.08) 28%, rgba(8, 8, 10, 0.62) 100%);
+    linear-gradient(90deg, rgba(8, 8, 10, 0.42) 0%, rgba(8, 8, 10, 0.16) 46%, rgba(8, 8, 10, 0.05) 100%),
+    linear-gradient(180deg, rgba(8, 8, 10, 0.28) 0%, rgba(8, 8, 10, 0.02) 32%, rgba(8, 8, 10, 0.32) 100%);
   pointer-events: none;
 }
 
