@@ -7,11 +7,13 @@ const nav = document.getElementById("nav");
 const wa = document.querySelector(".wa");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-const SOURCE_W = 1280;
-const SOURCE_H = 720;
-const MARK = { x: 1126, y: 566, w: 68, h: 68 };
+const SOURCE_W = 1920;
+const SOURCE_H = 1080;
+const MARK = { x: 1689, y: 849, w: 102, h: 102 };
 
-let scrubQueued = false;
+let playhead = 0;
+let seeking = false;
+let scrubbing = false;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -52,20 +54,35 @@ function paintChapters(progress) {
   chapterIndex.textContent = `0${active}  —  04`;
 }
 
-function scrub() {
-  if (reduceMotion || !film.duration || scrubQueued) return;
+function targetTime() {
+  return filmProgress() * Math.max(film.duration - 0.04, 0);
+}
+
+function stepFilm() {
+  scrubbing = false;
+  if (reduceMotion || !film.duration) return;
   if (!film.seekable.length || film.seekable.end(film.seekable.length - 1) < 0.5) return;
-  scrubQueued = true;
-  requestAnimationFrame(() => {
-    scrubQueued = false;
-    const next = filmProgress() * Math.max(film.duration - 0.04, 0);
-    if (Math.abs(next - film.currentTime) < 1 / 24) return;
+
+  const target = targetTime();
+  const gap = target - playhead;
+  playhead = Math.abs(gap) < 0.012 ? target : playhead + gap * 0.34;
+
+  if (!seeking && Math.abs(playhead - film.currentTime) > 1 / 60) {
+    seeking = true;
     try {
-      film.currentTime = next;
+      film.currentTime = playhead;
     } catch (err) {
-      /* Seeking waits until the browser can buffer the film. */
+      seeking = false;
     }
-  });
+  }
+
+  if (Math.abs(target - film.currentTime) > 1 / 60 || Math.abs(target - playhead) > 0.012) scrub();
+}
+
+function scrub() {
+  if (reduceMotion || scrubbing) return;
+  scrubbing = true;
+  requestAnimationFrame(stepFilm);
 }
 
 function onScroll() {
@@ -119,6 +136,10 @@ function unlockFilm() {
 }
 
 film.addEventListener("loadedmetadata", unlockFilm);
+film.addEventListener("seeked", () => {
+  seeking = false;
+  if (!reduceMotion) scrub();
+});
 film.addEventListener("progress", () => {
   if (!reduceMotion) scrub();
 });
