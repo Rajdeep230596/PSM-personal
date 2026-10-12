@@ -7,9 +7,9 @@ const nav = document.getElementById("nav");
 const wa = document.querySelector(".wa");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-const SOURCE_W = 1920;
-const SOURCE_H = 1080;
-const MARK = { x: 1689, y: 849, w: 102, h: 102 };
+const SOURCE_W = 1280;
+const SOURCE_H = 720;
+const MARK = { x: 1126, y: 566, w: 68, h: 68 };
 
 let playhead = 0;
 let seeking = false;
