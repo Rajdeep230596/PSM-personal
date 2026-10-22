@@ -1,0 +1,10 @@
+# The scroll-scrubbed film has to be seekable. A weak ETag makes
+# browsers abandon range requests, which freezes the backdrop.
+<Files "backdrop.mp4">
+  FileETag None
+  <IfModule mod_headers.c>
+    Header unset ETag
+    Header set Accept-Ranges "bytes"
+  </IfModule>
+  SetEnv no-gzip 1
+</Files>

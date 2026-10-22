@@ -10,6 +10,7 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
 let playhead = 0;
 let seeking = false;
 let scrubbing = false;
+let seekTimer = 0;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -54,10 +55,16 @@ function targetTime() {
   return filmProgress() * Math.max(film.duration - 0.04, 0);
 }
 
+function releaseSeek() {
+  seeking = false;
+  window.clearTimeout(seekTimer);
+}
+
 function stepFilm() {
   scrubbing = false;
   if (reduceMotion || !film.duration) return;
-  if (!film.seekable.length || film.seekable.end(film.seekable.length - 1) < 0.5) return;
+  const seekable = film.seekable.length ? film.seekable.end(film.seekable.length - 1) : 0;
+  if (seekable < 0.5 && film.readyState < 2) return;
 
   const target = targetTime();
   const gap = target - playhead;
@@ -65,10 +72,15 @@ function stepFilm() {
 
   if (!seeking && Math.abs(playhead - film.currentTime) > 1 / 60) {
     seeking = true;
+    window.clearTimeout(seekTimer);
+    seekTimer = window.setTimeout(() => {
+      seeking = false;
+      scrub();
+    }, 480);
     try {
       film.currentTime = playhead;
     } catch (err) {
-      seeking = false;
+      releaseSeek();
     }
   }
 
@@ -111,9 +123,10 @@ function unlockFilm() {
 
 film.addEventListener("loadedmetadata", unlockFilm);
 film.addEventListener("seeked", () => {
-  seeking = false;
+  releaseSeek();
   if (!reduceMotion) scrub();
 });
+film.addEventListener("error", releaseSeek);
 film.addEventListener("progress", () => {
   if (!reduceMotion) scrub();
 });
