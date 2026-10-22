@@ -148,27 +148,35 @@ textarea {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   font-size: 0.68rem;
-  padding: 0.55rem 0.8rem;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.9rem;
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
 }
 
 .story {
   position: relative;
   z-index: 1;
-  height: 540vh;
+  height: 675vh;
 }
 
 .story-sticky {
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   display: grid;
   align-items: end;
-  padding: calc(var(--nav) + 2rem) 8vw 12vh;
+  padding: calc(var(--nav) + 2rem) 8vw max(12vh, 5.5rem);
 }
 
 .chapter {
   grid-area: 1 / 1;
-  max-width: 38rem;
+  max-width: min(38rem, 100%);
   align-self: end;
   opacity: 0;
   transform: translateY(1.4rem);
@@ -210,6 +218,7 @@ h3 {
 
 h1 {
   font-size: clamp(4.2rem, 9vw, 8.4rem);
+  max-width: 100%;
 }
 
 h2 {
@@ -409,11 +418,14 @@ h2 {
 
 .form input,
 .form textarea {
+  width: 100%;
+  min-width: 0;
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line);
   padding: 0.7rem 0;
   outline: none;
+  font-size: 1rem;
 }
 
 .form input:focus,
@@ -464,6 +476,11 @@ h2 {
   gap: 2.75rem 4rem;
 }
 
+.details a,
+.details p {
+  overflow-wrap: anywhere;
+}
+
 .details a {
   text-decoration: none;
   border-bottom: 1px solid transparent;
@@ -512,10 +529,10 @@ h2 {
 .wa {
   position: fixed;
   z-index: 55;
-  right: 1.25rem;
-  bottom: 1.25rem;
-  width: 4.5rem;
-  height: 4.5rem;
+  right: max(1.25rem, env(safe-area-inset-right));
+  bottom: max(1.25rem, env(safe-area-inset-bottom));
+  width: 3.25rem;
+  height: 3.25rem;
   display: grid;
   place-items: center;
   background: #128c7e;
@@ -533,6 +550,75 @@ h2 {
 .wa:hover,
 .wa:focus-visible {
   background: #0e6f64;
+}
+
+@media (max-width: 1100px) {
+  .panel {
+    padding-top: 5.5rem;
+    padding-bottom: 5.5rem;
+  }
+
+  .panel-head,
+  .about {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2.5rem;
+  }
+
+  .panel-head {
+    gap: 0.8rem;
+  }
+
+  h1 {
+    font-size: clamp(3.4rem, 10vw, 6rem);
+    max-width: 9ch;
+  }
+
+  h2 {
+    font-size: clamp(2.6rem, 7vw, 4.4rem);
+    max-width: 100%;
+  }
+
+  .service-list {
+    gap: 0 2.2rem;
+  }
+
+  .service-list h3 {
+    font-size: clamp(1.45rem, 2.2vw, 2rem);
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .chapter-index {
+    display: none;
+  }
+
+  .story-sticky {
+    padding-top: calc(var(--nav) + 0.4rem);
+    padding-bottom: 4.5rem;
+  }
+
+  h1 {
+    font-size: 2.4rem;
+  }
+
+  h2 {
+    font-size: clamp(1.8rem, 7vh, 2.4rem);
+  }
+
+  .kicker {
+    margin-bottom: 0.35rem;
+  }
+
+  .lede,
+  .body {
+    margin-top: 0.45rem;
+  }
+
+  .scroll-cue {
+    margin-top: 0.55rem;
+  }
 }
 
 @media (max-width: 860px) {
@@ -563,7 +649,7 @@ h2 {
   }
 
   .story {
-    height: 460vh;
+    height: 575vh;
   }
 
   .story-sticky,
@@ -579,7 +665,12 @@ h2 {
   }
 
   h1 {
-    font-size: clamp(3.4rem, 16vw, 5rem);
+    font-size: clamp(3.1rem, 14vw, 4.6rem);
+    max-width: 8ch;
+  }
+
+  h2 {
+    max-width: none;
   }
 
   .service-list,
@@ -595,7 +686,11 @@ h2 {
   }
 
   .socials {
-    padding-bottom: 4.5rem;
+    padding-bottom: 1rem;
+  }
+
+  .footer {
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
   }
 }
 
