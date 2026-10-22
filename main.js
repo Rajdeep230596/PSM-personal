@@ -223,9 +223,9 @@ if (!reduceMotion) paintChapters(storyProgress());
       ...document.querySelectorAll(".contact .panel-head > *"),
       ...document.querySelectorAll(".form > label"),
       document.querySelector(".submit"),
-      ...document.querySelectorAll(".details > div"),
     ],
   ],
+  [document.querySelector(".directory"), [...document.querySelectorAll(".details > div")]],
   [document.querySelector(".footer"), [...document.querySelectorAll(".footer > *")]],
 ].forEach(([section, bits]) => {
   markPops(bits.filter(Boolean));
