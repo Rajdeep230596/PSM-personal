@@ -1,5 +1,7 @@
 const film = document.getElementById("film");
+const remoteSrc = film.dataset.src;
 const story = document.getElementById("story");
+const siteFoot = document.querySelector(".site-foot");
 const chapters = [...document.querySelectorAll(".chapter")];
 const progressBar = document.getElementById("progress-bar");
 const chapterIndex = document.getElementById("chapter-index");
@@ -23,10 +25,9 @@ function storyProgress() {
 }
 
 function filmProgress() {
-  const servicesTop =
-    document.getElementById("services").getBoundingClientRect().top + window.scrollY;
-  if (servicesTop <= 0) return 1;
-  return clamp(window.scrollY / servicesTop, 0, 1);
+  const end = siteFoot.getBoundingClientRect().top + window.scrollY;
+  if (end <= 0) return 1;
+  return clamp(window.scrollY / end, 0, 1);
 }
 
 function paintChapters(progress) {
@@ -68,7 +69,7 @@ function stepFilm() {
 
   const target = targetTime();
   const gap = target - playhead;
-  playhead = Math.abs(gap) < 0.012 ? target : playhead + gap * 0.34;
+  playhead = Math.abs(gap) < 0.008 ? target : playhead + gap * 0.62;
 
   if (!seeking && Math.abs(playhead - film.currentTime) > 1 / 60) {
     seeking = true;
@@ -76,7 +77,7 @@ function stepFilm() {
     seekTimer = window.setTimeout(() => {
       seeking = false;
       scrub();
-    }, 480);
+    }, 160);
     try {
       film.currentTime = playhead;
     } catch (err) {
@@ -121,6 +122,61 @@ function unlockFilm() {
   onScroll();
 }
 
+const filmCue = document.querySelector(".scroll-cue");
+
+function whenFilmReady(video) {
+  return new Promise((resolve) => {
+    if (video.readyState >= 2) {
+      resolve();
+      return;
+    }
+    video.addEventListener("loadeddata", () => resolve(), { once: true });
+    video.addEventListener("error", () => resolve(), { once: true });
+  });
+}
+
+function readFilm(src, onProgress) {
+  const report = typeof onProgress === "function" ? onProgress : () => {};
+  return fetch(src, { priority: "low" }).then(async (response) => {
+    if (!response.ok || !response.body) throw new Error("film");
+    const total = Number(response.headers.get("Content-Length")) || 0;
+    const reader = response.body.getReader();
+    const parts = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value);
+      received += value.byteLength;
+      if (total) report(received / total);
+    }
+    report(1);
+    return new Blob(parts, { type: "video/mp4" });
+  });
+}
+
+function mountClip(video, src, onProgress) {
+  return readFilm(src, onProgress).then((blob) => {
+    video.src = URL.createObjectURL(blob);
+    return whenFilmReady(video);
+  });
+}
+
+function beginFilm() {
+  mountClip(film, remoteSrc, (ratio) => {
+    const pct = String(Math.round(ratio * 100)).padStart(2, "0");
+    filmCue.textContent = `Loading film ${pct}`;
+  })
+    .then(() => {
+      filmCue.textContent = "Scroll to unfold";
+      if (!reduceMotion) onScroll();
+    })
+    .catch(() => {
+      film.src = remoteSrc;
+      filmCue.textContent = "Scroll to unfold";
+    });
+}
+
 film.addEventListener("loadedmetadata", unlockFilm);
 film.addEventListener("seeked", () => {
   releaseSeek();
@@ -136,6 +192,8 @@ film.addEventListener("canplay", () => {
 
 document.getElementById("year").textContent = String(new Date().getFullYear());
 
+if (document.readyState === "complete") beginFilm();
+else window.addEventListener("load", beginFilm, { once: true });
 if (!reduceMotion) paintChapters(0);
 window.addEventListener("scroll", onScroll, { passive: true });
 onScroll();

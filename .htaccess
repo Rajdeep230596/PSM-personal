@@ -1,10 +1,37 @@
-# The scroll-scrubbed film has to be seekable. A weak ETag makes
-# browsers abandon range requests, which freezes the backdrop.
+# Text responses compress. The film does not: gzipping it breaks seeking.
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript image/svg+xml
+</IfModule>
+
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType text/css "access plus 7 days"
+  ExpiresByType text/javascript "access plus 7 days"
+  ExpiresByType application/javascript "access plus 7 days"
+  ExpiresByType image/webp "access plus 30 days"
+  ExpiresByType image/jpeg "access plus 30 days"
+  ExpiresByType font/woff2 "access plus 30 days"
+  ExpiresByType video/mp4 "access plus 30 days"
+</IfModule>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.(css|js|webp|jpe?g|woff2)$">
+    Header always set Cache-Control "public, max-age=2592000"
+  </FilesMatch>
+  <FilesMatch "\.(html)$">
+    Header always set Cache-Control "public, max-age=0, must-revalidate"
+  </FilesMatch>
+</IfModule>
+
+# This host stamps Last-Modified with the current time. Chrome then rejects
+# the range it needs for the next frame, so the film stays on one chapter.
 <Files "backdrop.mp4">
   FileETag None
   <IfModule mod_headers.c>
-    Header unset ETag
+    Header always unset ETag
+    Header always unset Last-Modified
     Header set Accept-Ranges "bytes"
+    Header set Cache-Control "public, max-age=2592000"
   </IfModule>
   SetEnv no-gzip 1
 </Files>

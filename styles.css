@@ -11,6 +11,30 @@
   --nav: 5.2rem;
 }
 
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 500 600;
+  font-display: swap;
+  src: url("assets/fonts/cormorant-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: italic;
+  font-weight: 500;
+  font-display: swap;
+  src: url("assets/fonts/cormorant-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-weight: 300 500;
+  font-display: swap;
+  src: url("assets/fonts/outfit.woff2") format("woff2");
+}
+
 * {
   box-sizing: border-box;
 }
@@ -274,22 +298,12 @@ h2 {
   background: transparent;
 }
 
-.services {
-  background: linear-gradient(
-    180deg,
-    rgba(9, 10, 12, 0.66) 0%,
-    rgba(9, 10, 12, 0.75) 55%,
-    var(--sheet) 100%
-  );
+.services,
+.about,
+.contact {
+  background: transparent;
 }
 
-.about {
-  background:
-    radial-gradient(1200px 500px at 10% -10%, rgba(214, 186, 120, 0.08), transparent 55%),
-    var(--sheet);
-}
-
-.contact,
 .directory,
 .footer {
   background: var(--sheet);
