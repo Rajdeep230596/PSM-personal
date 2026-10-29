@@ -25,7 +25,8 @@ function storyProgress() {
 }
 
 function filmProgress() {
-  const end = siteFoot.getBoundingClientRect().top + window.scrollY;
+  const footTop = siteFoot.getBoundingClientRect().top + window.scrollY;
+  const end = footTop - window.innerHeight;
   if (end <= 0) return 1;
   return clamp(window.scrollY / end, 0, 1);
 }
@@ -110,10 +111,38 @@ function placeWhatsApp() {
   wa.style.bottom = "";
   wa.style.width = "";
   wa.style.height = "";
+  if (!film.videoWidth || !film.videoHeight) return;
+
+  const rect = film.getBoundingClientRect();
+  const scale = Math.max(rect.width / film.videoWidth, rect.height / film.videoHeight);
+  const originX = rect.left + (rect.width - film.videoWidth * scale) / 2;
+  const originY = rect.top + (rect.height - film.videoHeight * scale) / 2;
+  const markX = 1692;
+  const markY = 822;
+  const markW = 96;
+  const markH = 126;
+  const centerX = originX + (markX + markW / 2) * scale;
+  const centerY = originY + (markY + markH / 2) * scale;
+  const margin = 12;
+  if (
+    centerX < margin ||
+    centerY < margin ||
+    centerX > window.innerWidth - margin ||
+    centerY > window.innerHeight - margin
+  ) {
+    return;
+  }
+
+  const size = wa.offsetWidth;
+  wa.style.right = "auto";
+  wa.style.bottom = "auto";
+  wa.style.left = `${centerX - size / 2}px`;
+  wa.style.top = `${centerY - size / 2}px`;
 }
 
 function unlockFilm() {
   film.pause();
+  placeWhatsApp();
   if (reduceMotion) {
     film.loop = true;
     film.play().catch(() => {});
