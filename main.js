@@ -44,6 +44,15 @@ function filmProgress() {
   return clamp(scroller.scrollTop / contactTop, 0, 1);
 }
 
+function pictureFit(rect) {
+  const scale = Math.min(rect.width / pictureWidth, rect.height / pictureHeight);
+  return {
+    scale,
+    originX: rect.left + (rect.width - pictureWidth * scale) / 2,
+    originY: rect.top + (rect.height - pictureHeight * scale) / 2,
+  };
+}
+
 function placeTabletForm() {
   const top = viewTop(contact);
   const foot = viewTop(siteFoot);
@@ -54,9 +63,8 @@ function placeTabletForm() {
   if (!pictureWidth || !pictureHeight) return;
 
   const rect = film.getBoundingClientRect();
-  const scale = Math.max(rect.width / pictureWidth, rect.height / pictureHeight);
-  const originX = rect.left + (rect.width - pictureWidth * scale) / 2;
-  const originY = rect.top + (rect.height - pictureHeight * scale) / 2;
+  const fit = pictureFit(rect);
+  const { scale, originX, originY } = fit;
   const sx = pictureWidth / 1920;
   const sy = pictureHeight / 1080;
   const placed = [...tabletForm.querySelectorAll("[data-box]")].map((field) => {
@@ -183,7 +191,20 @@ function trimFrameCache(index) {
 }
 
 function drawFrame(index, bitmap) {
-  filmCtx.drawImage(bitmap, 0, 0, pictureWidth, pictureHeight);
+  const rect = film.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (film.width !== w || film.height !== h) {
+    film.width = w;
+    film.height = h;
+  }
+  filmCtx.fillStyle = "#050607";
+  filmCtx.fillRect(0, 0, w, h);
+  const scale = Math.min(w / bitmap.width, h / bitmap.height);
+  const dw = bitmap.width * scale;
+  const dh = bitmap.height * scale;
+  filmCtx.drawImage(bitmap, (w - dw) / 2, (h - dh) / 2, dw, dh);
   frameShown = index;
   film.dataset.frame = String(index);
 }
@@ -249,8 +270,6 @@ function parseFrameHeader() {
   frameOffsets = new Uint32Array(frameCount + 1);
   for (let i = 0; i <= frameCount; i += 1) frameOffsets[i] = tableView.getUint32(i * 4, true);
   frameParsed = true;
-  film.width = pictureWidth;
-  film.height = pictureHeight;
   placeWhatsApp();
   placeTabletForm();
   requestFilm();
@@ -304,9 +323,8 @@ function placeWhatsApp() {
   wa.style.height = "";
 
   const rect = film.getBoundingClientRect();
-  const scale = Math.max(rect.width / pictureWidth, rect.height / pictureHeight);
-  const originX = rect.left + (rect.width - pictureWidth * scale) / 2;
-  const originY = rect.top + (rect.height - pictureHeight * scale) / 2;
+  const fit = pictureFit(rect);
+  const { scale, originX, originY } = fit;
   const sx = pictureWidth / 1920;
   const sy = pictureHeight / 1080;
   const markX = 1692 * sx;
@@ -347,21 +365,42 @@ if (reduceMotion) {
   };
   requestAnimationFrame(tick);
 }
+function fitScreen() {
+  const viewport = window.visualViewport;
+  const fullW = viewport ? viewport.width : window.innerWidth;
+  const fullH = viewport ? viewport.height : window.innerHeight;
+  const w = Math.min(fullW, 1280);
+  const h = Math.min(fullH, 1080);
+  const offsetTop = viewport ? viewport.offsetTop : 0;
+  const offsetLeft = viewport ? viewport.offsetLeft : 0;
+  document.documentElement.style.setProperty("--screen-w", `${w}px`);
+  document.documentElement.style.setProperty("--screen-h", `${h}px`);
+  screen.style.top = `${offsetTop + (fullH - h) / 2}px`;
+  screen.style.left = `${offsetLeft + (fullW - w) / 2}px`;
+  screen.style.right = "auto";
+  screen.style.bottom = "auto";
+  screen.style.margin = "0";
+}
+
+function fitStage() {
+  fitScreen();
+  if (frameShown >= 0 && frameCache.has(frameShown)) drawFrame(frameShown, frameCache.get(frameShown));
+  placeWhatsApp();
+  placeTabletForm();
+}
+
+fitScreen();
 document.getElementById("year").textContent = String(new Date().getFullYear());
 if (!reduceMotion) paintChapters(0);
 scroller.addEventListener("scroll", onScroll, { passive: true });
 onScroll();
 
 window.addEventListener("resize", () => {
-  placeWhatsApp();
-  placeTabletForm();
+  fitStage();
   if (!reduceMotion) onScroll();
 });
 if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", () => {
-    placeWhatsApp();
-    placeTabletForm();
-  });
+  window.visualViewport.addEventListener("resize", fitStage);
 }
 placeWhatsApp();
 placeTabletForm();
@@ -442,13 +481,14 @@ form.addEventListener("submit", (event) => {
   const note = String(data.get("note") || "").trim();
   const reference = String(data.get("reference") || "").trim();
   const message = String(data.get("message") || "").trim();
-  const lines = [`Name: ${name}`, `Email: ${email}`];
+  const lines = ["Hello PSM Infinity,", "", `Name: ${name}`, `Email: ${email}`, `Subject: ${subject}`];
   if (note) lines.push(`Note: ${note}`);
   if (reference) lines.push(`Reference: ${reference}`);
   lines.push("", message);
-  const body = lines.join("\n");
-  window.location.href = `mailto:psminfinity@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  status.textContent = "Your email app is opening.";
+  const url = `https://wa.me/919007431000?text=${encodeURIComponent(lines.join("\n"))}`;
+  const opened = window.open(url, "_blank", "noopener");
+  if (!opened) window.location.href = url;
+  status.textContent = "WhatsApp is opening.";
 });
 form.addEventListener("reset", () => {
   status.textContent = "";
