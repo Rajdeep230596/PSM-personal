@@ -41,6 +41,7 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: clip;
 }
 
 body {
@@ -50,6 +51,7 @@ body {
   font-family: var(--sans);
   font-weight: 300;
   line-height: 1.6;
+  overflow-x: clip;
 }
 
 img {
@@ -66,6 +68,13 @@ input,
 textarea {
   font: inherit;
   color: inherit;
+}
+
+a,
+button,
+input,
+textarea {
+  touch-action: manipulation;
 }
 
 .skip {
@@ -131,8 +140,12 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: var(--nav);
-  padding: 0 4vw;
+  height: calc(var(--nav) + env(safe-area-inset-top));
+  padding:
+    env(safe-area-inset-top)
+    max(4vw, env(safe-area-inset-right))
+    0
+    max(4vw, env(safe-area-inset-left));
   mix-blend-mode: normal;
 }
 
@@ -145,6 +158,53 @@ textarea {
 .brand img {
   width: 7.2rem;
   height: auto;
+}
+
+.nav-end {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.sound {
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ivory);
+  cursor: pointer;
+}
+
+.sound svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.sound .sound-on {
+  display: none;
+}
+
+.sound.is-on {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
+.sound.is-on .sound-on {
+  display: block;
+}
+
+.sound.is-on .sound-off {
+  display: none;
+}
+
+.sound:hover,
+.sound:focus-visible {
+  color: var(--gold);
+  border-color: var(--gold);
 }
 
 .nav-links {
@@ -195,7 +255,7 @@ button:focus-visible {
   height: 100dvh;
   display: grid;
   align-items: end;
-  padding: calc(var(--nav) + 2rem) 8vw max(12vh, 5.5rem);
+  padding: calc(var(--nav) + env(safe-area-inset-top) + 2rem) max(8vw, env(safe-area-inset-right)) max(12vh, 5.5rem) max(8vw, env(safe-area-inset-left));
 }
 
 .chapter {
@@ -213,7 +273,7 @@ button:focus-visible {
 
 .chapter-index {
   position: absolute;
-  top: calc(var(--nav) + 1.5rem);
+  top: calc(var(--nav) + env(safe-area-inset-top) + 1.5rem);
   left: 8vw;
   margin: 0;
   font-size: 0.72rem;
@@ -302,6 +362,159 @@ h2 {
 .about,
 .contact {
   background: transparent;
+}
+
+.contact {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 100vh;
+  height: 100dvh;
+  padding: 0;
+  overflow: hidden;
+}
+
+.tablet-form {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  margin: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.tablet-form.is-live {
+  opacity: 1;
+  visibility: visible;
+}
+
+.tablet-field,
+.tablet-btn,
+.form-status {
+  position: absolute;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+.tablet-field {
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+  color: var(--ivory);
+  caret-color: var(--gold);
+  font: inherit;
+  line-height: 1.2;
+  padding: 0 0.45rem;
+  outline: none;
+  cursor: text;
+}
+
+.tablet-field:hover,
+.tablet-field:focus {
+  background: rgba(9, 10, 12, 0.42);
+}
+
+.tablet-form.is-live .tablet-field,
+.tablet-form.is-live .tablet-btn {
+  pointer-events: auto;
+}
+
+.tablet-field::placeholder {
+  color: transparent;
+}
+
+.tablet-form.is-fit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-content: end;
+  gap: 0.65rem;
+  padding:
+    calc(var(--nav) + 0.75rem)
+    max(1rem, env(safe-area-inset-right))
+    calc(5.75rem + env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+  overflow: auto;
+  background: linear-gradient(180deg, rgba(9, 10, 12, 0.08), rgba(9, 10, 12, 0.78) 42%);
+}
+
+.tablet-form.is-fit .tablet-field,
+.tablet-form.is-fit .tablet-btn,
+.tablet-form.is-fit .form-status {
+  position: relative;
+  left: auto;
+  top: auto;
+  width: 100%;
+  height: auto;
+  min-height: 2.75rem;
+  font-size: 1rem;
+}
+
+.tablet-form.is-fit .tablet-field {
+  background: rgba(9, 10, 12, 0.78);
+  border-bottom: 1px solid rgba(214, 186, 120, 0.72);
+  padding: 0.65rem 0.75rem;
+}
+
+.tablet-form.is-fit .tablet-field::placeholder {
+  color: rgba(244, 239, 230, 0.62);
+}
+
+.tablet-form.is-fit [name="name"],
+.tablet-form.is-fit [name="message"],
+.tablet-form.is-fit .form-status {
+  grid-column: 1 / -1;
+}
+
+.tablet-form.is-fit .tablet-btn {
+  min-height: 2.85rem;
+}
+
+textarea.tablet-field {
+  resize: none;
+  padding-top: 0.15rem;
+}
+
+.tablet-btn {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 2px;
+  font-family: var(--sans);
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+  text-rendering: geometricPrecision;
+  cursor: pointer;
+}
+
+.tablet-clear {
+  background: #0c0e10;
+  color: var(--ivory);
+  border: 1px solid rgba(244, 239, 230, 0.92);
+}
+
+.tablet-clear:hover,
+.tablet-clear:focus-visible {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
+.tablet-send {
+  border: 0;
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.tablet-send:hover,
+.tablet-send:focus-visible {
+  background: var(--ivory);
+}
+
+.site-foot {
+  position: relative;
+  z-index: 4;
 }
 
 .directory,
@@ -415,61 +628,11 @@ h2 {
   font-size: 0.72rem;
 }
 
-.form {
-  display: grid;
-  gap: 1rem;
-  max-width: 36rem;
-}
-
-.form label {
-  display: grid;
-  gap: 0.4rem;
-  font-size: 0.72rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--gold);
-}
-
-.form input,
-.form textarea {
-  width: 100%;
-  min-width: 0;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  padding: 0.7rem 0;
-  outline: none;
-  font-size: 1rem;
-}
-
-.form input:focus,
-.form textarea:focus {
-  border-bottom-color: var(--gold);
-}
-
-.submit {
-  justify-self: start;
-  margin-top: 0.6rem;
-  background: var(--ivory);
-  color: var(--ink);
-  border: 0;
-  padding: 0.9rem 1.4rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  font-size: 0.72rem;
-  cursor: pointer;
-}
-
-.submit:hover {
-  background: var(--gold);
-}
-
 .form-status {
-  min-height: 1.2rem;
-  letter-spacing: 0;
-  text-transform: none;
-  font-size: 0.95rem;
   color: var(--ivory-dim);
+  letter-spacing: 0;
+  line-height: 1.2;
+  pointer-events: none;
 }
 
 .directory {
@@ -643,7 +806,7 @@ h2 {
   .nav-links {
     display: none;
     position: absolute;
-    top: var(--nav);
+    top: calc(var(--nav) + env(safe-area-inset-top));
     left: 0;
     right: 0;
     flex-direction: column;
@@ -670,8 +833,8 @@ h2 {
   .panel,
   .directory,
   .footer {
-    padding-left: 6vw;
-    padding-right: 6vw;
+    padding-left: max(6vw, env(safe-area-inset-left));
+    padding-right: max(6vw, env(safe-area-inset-right));
   }
 
   .chapter-index {

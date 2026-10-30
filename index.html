@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>PSM Infinity — Sunandan Mitra | Premium Visual Experiences</title>
     <meta
       name="description"
@@ -33,7 +33,7 @@
         playsinline
         preload="none"
         poster="assets/poster.jpg"
-        data-src="assets/backdrop.mp4"
+        data-src="assets/backdrop.mp4?v=3"
       ></video>
       <div class="shade"></div>
     </div>
@@ -44,15 +44,25 @@
       <a class="brand" href="#story" aria-label="PSM Infinity, back to start">
         <img src="assets/mark.webp" alt="" width="120" height="72" />
       </a>
-      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
-        Menu
-      </button>
-      <nav id="nav-links" class="nav-links">
-        <a href="#story">Story</a>
-        <a href="#services">Services</a>
-        <a href="#about">About</a>
-        <a href="#contact">Contact</a>
-      </nav>
+      <div class="nav-end">
+        <button class="sound" type="button" aria-pressed="false" aria-label="Unmute music">
+          <svg class="sound-on" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4zm11.5 3a3.5 3.5 0 0 0-1.5-2.9v5.8a3.5 3.5 0 0 0 1.5-2.9z" />
+          </svg>
+          <svg class="sound-off" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4zm13.2 3 2.3-2.3-1.4-1.4L15.8 10.6 13.5 8.3l-1.4 1.4 2.3 2.3-2.3 2.3 1.4 1.4 2.3-2.3 2.3 2.3 1.4-1.4z" />
+          </svg>
+        </button>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+          Menu
+        </button>
+        <nav id="nav-links" class="nav-links">
+          <a href="#story">Story</a>
+          <a href="#services">Services</a>
+          <a href="#about">About</a>
+          <a href="#contact">Contact</a>
+        </nav>
+      </div>
     </header>
 
     <main>
@@ -177,30 +187,17 @@
           </div>
         </section>
 
-        <section class="panel contact" id="contact">
-          <div class="panel-head">
-            <p class="kicker">Get in touch</p>
-            <h2>Begin a conversation.</h2>
-          </div>
-          <form class="form" id="contact-form">
-            <label>
-              Name
-              <input name="name" type="text" autocomplete="name" required />
-            </label>
-            <label>
-              Email
-              <input name="email" type="email" autocomplete="email" required />
-            </label>
-            <label>
-              Subject
-              <input name="subject" type="text" required />
-            </label>
-            <label>
-              Message
-              <textarea name="message" rows="5" required></textarea>
-            </label>
-            <button class="submit" type="submit">Send a note</button>
-            <p class="form-status" id="form-status" role="status"></p>
+        <section class="contact" id="contact">
+          <form class="tablet-form" id="contact-form">
+            <input class="tablet-field" data-box="720,456,560,42" name="name" type="text" autocomplete="name" aria-label="Name" placeholder="Name" required />
+            <input class="tablet-field" data-box="760,524,250,42" name="email" type="email" autocomplete="email" aria-label="Email" placeholder="Email" required />
+            <input class="tablet-field" data-box="1188,524,180,42" name="subject" type="text" aria-label="Subject" placeholder="Subject" required />
+            <input class="tablet-field" data-box="820,592,190,42" name="note" type="text" aria-label="Note" placeholder="Note" />
+            <input class="tablet-field" data-box="1205,592,165,42" name="reference" type="text" aria-label="Reference" placeholder="Reference" />
+            <textarea class="tablet-field" data-box="655,700,640,96" name="message" aria-label="Message" placeholder="Message" required></textarea>
+            <button class="tablet-btn tablet-clear" data-box="826,830,240,52" type="reset">Clear</button>
+            <button class="tablet-btn tablet-send" data-box="1086,830,230,52" type="submit">Send</button>
+            <p class="form-status" id="form-status" data-box="620,886,690,32" role="status"></p>
           </form>
         </section>
 
@@ -273,6 +270,7 @@
       </svg>
     </a>
 
-    <script src="main.js?v=11" defer></script>
+    <audio id="music" src="assets/coat.mp3" autoplay loop preload="auto"></audio>
+    <script src="main.js?v=19" defer></script>
   </body>
 </html>

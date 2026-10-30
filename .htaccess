@@ -12,10 +12,11 @@
   ExpiresByType image/jpeg "access plus 30 days"
   ExpiresByType font/woff2 "access plus 30 days"
   ExpiresByType video/mp4 "access plus 30 days"
+  ExpiresByType audio/mpeg "access plus 30 days"
 </IfModule>
 
 <IfModule mod_headers.c>
-  <FilesMatch "\.(css|js|webp|jpe?g|woff2)$">
+  <FilesMatch "\.(css|js|webp|jpe?g|woff2|mp3)$">
     Header always set Cache-Control "public, max-age=2592000"
   </FilesMatch>
   <FilesMatch "\.(html)$">
@@ -30,8 +31,10 @@
   <IfModule mod_headers.c>
     Header always unset ETag
     Header always unset Last-Modified
-    Header set Accept-Ranges "bytes"
-    Header set Cache-Control "public, max-age=2592000"
+    Header always unset Content-Encoding
+    Header always set Accept-Ranges "bytes"
+    Header always set Cache-Control "public, max-age=2592000"
   </IfModule>
   SetEnv no-gzip 1
+  SetEnv dont-vary 1
 </Files>

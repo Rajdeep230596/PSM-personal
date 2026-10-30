@@ -2,6 +2,8 @@ const film = document.getElementById("film");
 const remoteSrc = film.dataset.src;
 const story = document.getElementById("story");
 const siteFoot = document.querySelector(".site-foot");
+const contact = document.getElementById("contact");
+const tabletForm = document.getElementById("contact-form");
 const chapters = [...document.querySelectorAll(".chapter")];
 const progressBar = document.getElementById("progress-bar");
 const chapterIndex = document.getElementById("chapter-index");
@@ -11,6 +13,7 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
 
 let playhead = 0;
 let seeking = false;
+let seekWanted = false;
 let scrubbing = false;
 let seekTimer = 0;
 
@@ -25,10 +28,64 @@ function storyProgress() {
 }
 
 function filmProgress() {
-  const footTop = siteFoot.getBoundingClientRect().top + window.scrollY;
-  const end = footTop - window.innerHeight;
-  if (end <= 0) return 1;
-  return clamp(window.scrollY / end, 0, 1);
+  const contactTop = contact.getBoundingClientRect().top + window.scrollY;
+  if (contactTop <= 0) return 1;
+  return clamp(window.scrollY / contactTop, 0, 1);
+}
+
+function placeTabletForm() {
+  const top = contact.getBoundingClientRect().top;
+  const foot = siteFoot.getBoundingClientRect().top;
+  const locked = top >= -4 && top <= 12 && foot >= window.innerHeight - 4;
+  const live = film.videoWidth > 0 && locked;
+  tabletForm.classList.toggle("is-live", live);
+  if (!live && tabletForm.contains(document.activeElement)) document.activeElement.blur();
+  if (!film.videoWidth || !film.videoHeight) return;
+
+  const rect = film.getBoundingClientRect();
+  const scale = Math.max(rect.width / film.videoWidth, rect.height / film.videoHeight);
+  const originX = rect.left + (rect.width - film.videoWidth * scale) / 2;
+  const originY = rect.top + (rect.height - film.videoHeight * scale) / 2;
+  const sx = film.videoWidth / 1920;
+  const sy = film.videoHeight / 1080;
+  const placed = [...tabletForm.querySelectorAll("[data-box]")].map((field) => {
+    const [x, y, w, h] = field.dataset.box.split(",").map(Number);
+    return {
+      field,
+      left: originX + x * sx * scale,
+      top: originY + y * sy * scale,
+      width: w * sx * scale,
+      height: h * sy * scale,
+    };
+  });
+  const margin = 10;
+  const heavilyCropped = window.innerWidth < 700 || placed.some((item) => {
+    const visible = Math.min(item.left + item.width, window.innerWidth - margin) - Math.max(item.left, margin);
+    return visible < item.width * 0.62;
+  });
+  const fits = !heavilyCropped;
+  tabletForm.classList.toggle("is-fit", !fits);
+
+  placed.forEach((item) => {
+    if (!fits) {
+      item.field.style.left = "";
+      item.field.style.top = "";
+      item.field.style.width = "";
+      item.field.style.height = "";
+      item.field.style.fontSize = "";
+      return;
+    }
+    const left = Math.max(margin, item.left);
+    const top = Math.max(margin, item.top);
+    const width = Math.max(48, Math.min(item.width, window.innerWidth - margin - left));
+    const height = Math.max(28, Math.min(item.height, window.innerHeight - margin - top));
+    item.field.style.left = `${left}px`;
+    item.field.style.top = `${top}px`;
+    item.field.style.width = `${width}px`;
+    item.field.style.height = `${height}px`;
+    const isButton = item.field.classList.contains("tablet-btn");
+    item.field.style.fontSize = `${Math.max(16, (isButton ? 15 : 18) * scale)}px`;
+  });
 }
 
 function paintChapters(progress) {
@@ -72,13 +129,16 @@ function stepFilm() {
   const gap = target - playhead;
   playhead = Math.abs(gap) < 0.008 ? target : playhead + gap * 0.62;
 
-  if (!seeking && Math.abs(playhead - film.currentTime) > 1 / 60) {
+  if (seeking) {
+    seekWanted = true;
+  } else if (Math.abs(playhead - film.currentTime) > 1 / 60) {
     seeking = true;
+    seekWanted = false;
     window.clearTimeout(seekTimer);
     seekTimer = window.setTimeout(() => {
       seeking = false;
       scrub();
-    }, 160);
+    }, 480);
     try {
       film.currentTime = playhead;
     } catch (err) {
@@ -86,7 +146,7 @@ function stepFilm() {
     }
   }
 
-  if (Math.abs(target - film.currentTime) > 1 / 60 || Math.abs(target - playhead) > 0.012) scrub();
+  if (!seeking && (Math.abs(target - film.currentTime) > 1 / 60 || Math.abs(target - playhead) > 0.012)) scrub();
 }
 
 function scrub() {
@@ -102,6 +162,7 @@ function onScroll() {
   nav.classList.toggle("is-solid", story.getBoundingClientRect().bottom < window.innerHeight * 0.9);
   scrub();
   placeWhatsApp();
+  placeTabletForm();
 }
 
 function placeWhatsApp() {
@@ -117,10 +178,12 @@ function placeWhatsApp() {
   const scale = Math.max(rect.width / film.videoWidth, rect.height / film.videoHeight);
   const originX = rect.left + (rect.width - film.videoWidth * scale) / 2;
   const originY = rect.top + (rect.height - film.videoHeight * scale) / 2;
-  const markX = 1692;
-  const markY = 822;
-  const markW = 96;
-  const markH = 126;
+  const sx = film.videoWidth / 1920;
+  const sy = film.videoHeight / 1080;
+  const markX = 1692 * sx;
+  const markY = 822 * sy;
+  const markW = 96 * sx;
+  const markH = 126 * sy;
   const centerX = originX + (markX + markW / 2) * scale;
   const centerY = originY + (markY + markH / 2) * scale;
   const margin = 12;
@@ -191,7 +254,7 @@ function mountClip(video, src, onProgress) {
   });
 }
 
-function beginFilm() {
+function beginFilm(attempt) {
   mountClip(film, remoteSrc, (ratio) => {
     const pct = String(Math.round(ratio * 100)).padStart(2, "0");
     filmCue.textContent = `Loading film ${pct}`;
@@ -201,6 +264,10 @@ function beginFilm() {
       if (!reduceMotion) onScroll();
     })
     .catch(() => {
+      if (attempt < 1) {
+        beginFilm(attempt + 1);
+        return;
+      }
       film.src = remoteSrc;
       filmCue.textContent = "Scroll to unfold";
     });
@@ -221,17 +288,73 @@ film.addEventListener("canplay", () => {
 
 document.getElementById("year").textContent = String(new Date().getFullYear());
 
-if (document.readyState === "complete") beginFilm();
-else window.addEventListener("load", beginFilm, { once: true });
+if (document.readyState === "complete") beginFilm(0);
+else window.addEventListener("load", () => beginFilm(0), { once: true });
 if (!reduceMotion) paintChapters(0);
 window.addEventListener("scroll", onScroll, { passive: true });
 onScroll();
 
 window.addEventListener("resize", () => {
   placeWhatsApp();
+  placeTabletForm();
   if (!reduceMotion) onScroll();
 });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", () => {
+    placeWhatsApp();
+    placeTabletForm();
+  });
+}
 placeWhatsApp();
+placeTabletForm();
+
+const music = document.getElementById("music");
+const sound = document.querySelector(".sound");
+let muted = false;
+
+function musicPlaying() {
+  return !muted && !music.paused && !music.muted;
+}
+
+function paintSound() {
+  const playing = musicPlaying();
+  sound.classList.toggle("is-on", playing);
+  sound.setAttribute("aria-pressed", String(playing));
+  sound.setAttribute("aria-label", playing ? "Mute music" : "Unmute music");
+}
+
+function startMusic() {
+  if (muted) return;
+  music.muted = false;
+  music.volume = 0.5;
+  const pending = music.play();
+  if (pending && pending.then) {
+    pending.then(paintSound).catch(() => paintSound());
+    return;
+  }
+  paintSound();
+}
+
+sound.addEventListener("pointerdown", (event) => event.stopPropagation());
+sound.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (musicPlaying()) {
+    muted = true;
+    music.pause();
+    paintSound();
+    return;
+  }
+  muted = false;
+  startMusic();
+});
+
+startMusic();
+music.addEventListener("canplay", startMusic);
+["pointerdown", "keydown", "touchstart", "wheel", "scroll"].forEach((type) => {
+  window.addEventListener(type, () => {
+    if (music.paused && !muted) startMusic();
+  }, { passive: true });
+});
 
 const toggle = document.querySelector(".nav-toggle");
 toggle.addEventListener("click", () => {
@@ -255,10 +378,19 @@ form.addEventListener("submit", (event) => {
   const name = String(data.get("name") || "").trim();
   const email = String(data.get("email") || "").trim();
   const subject = String(data.get("subject") || "").trim();
+  const note = String(data.get("note") || "").trim();
+  const reference = String(data.get("reference") || "").trim();
   const message = String(data.get("message") || "").trim();
-  const body = `Name: ${name}\nEmail: ${email}\n\n${message}`;
+  const lines = [`Name: ${name}`, `Email: ${email}`];
+  if (note) lines.push(`Note: ${note}`);
+  if (reference) lines.push(`Reference: ${reference}`);
+  lines.push("", message);
+  const body = lines.join("\n");
   window.location.href = `mailto:psminfinity@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   status.textContent = "Your email app is opening.";
+});
+form.addEventListener("reset", () => {
+  status.textContent = "";
 });
 
 function markPops(elements) {
@@ -293,11 +425,7 @@ if (!reduceMotion) paintChapters(storyProgress());
   ],
   [
     document.querySelector(".contact"),
-    [
-      ...document.querySelectorAll(".contact .panel-head > *"),
-      ...document.querySelectorAll(".form > label"),
-      document.querySelector(".submit"),
-    ],
+    [],
   ],
   [document.querySelector(".directory"), [...document.querySelectorAll(".details > div")]],
   [document.querySelector(".footer"), [...document.querySelectorAll(".footer > *")]],
