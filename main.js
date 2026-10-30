@@ -44,8 +44,18 @@ function filmProgress() {
   return clamp(scroller.scrollTop / contactTop, 0, 1);
 }
 
+function frameContains(width, height) {
+  return width < 900 || height > width;
+}
+
+function frameScale(boxW, boxH, imageW, imageH) {
+  return frameContains(boxW, boxH)
+    ? Math.min(boxW / imageW, boxH / imageH)
+    : Math.max(boxW / imageW, boxH / imageH);
+}
+
 function pictureFit(rect) {
-  const scale = Math.min(rect.width / pictureWidth, rect.height / pictureHeight);
+  const scale = frameScale(rect.width, rect.height, pictureWidth, pictureHeight);
   return {
     scale,
     originX: rect.left + (rect.width - pictureWidth * scale) / 2,
@@ -201,9 +211,9 @@ function drawFrame(index, bitmap) {
   }
   filmCtx.fillStyle = "#050607";
   filmCtx.fillRect(0, 0, w, h);
-  const scale = Math.min(w / bitmap.width, h / bitmap.height);
-  const dw = bitmap.width * scale;
-  const dh = bitmap.height * scale;
+  const scale = frameScale(rect.width, rect.height, bitmap.width, bitmap.height);
+  const dw = bitmap.width * scale * dpr;
+  const dh = bitmap.height * scale * dpr;
   filmCtx.drawImage(bitmap, (w - dw) / 2, (h - dh) / 2, dw, dh);
   frameShown = index;
   film.dataset.frame = String(index);
@@ -369,14 +379,12 @@ function fitScreen() {
   const viewport = window.visualViewport;
   const fullW = viewport ? viewport.width : window.innerWidth;
   const fullH = viewport ? viewport.height : window.innerHeight;
-  const w = Math.min(fullW, 1280);
-  const h = Math.min(fullH, 1080);
   const offsetTop = viewport ? viewport.offsetTop : 0;
   const offsetLeft = viewport ? viewport.offsetLeft : 0;
-  document.documentElement.style.setProperty("--screen-w", `${w}px`);
-  document.documentElement.style.setProperty("--screen-h", `${h}px`);
-  screen.style.top = `${offsetTop + (fullH - h) / 2}px`;
-  screen.style.left = `${offsetLeft + (fullW - w) / 2}px`;
+  document.documentElement.style.setProperty("--screen-w", `${fullW}px`);
+  document.documentElement.style.setProperty("--screen-h", `${fullH}px`);
+  screen.style.top = `${offsetTop}px`;
+  screen.style.left = `${offsetLeft}px`;
   screen.style.right = "auto";
   screen.style.bottom = "auto";
   screen.style.margin = "0";
