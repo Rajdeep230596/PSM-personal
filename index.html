@@ -19,22 +19,14 @@
     <meta name="theme-color" content="#090a0c" />
     <link rel="preload" href="assets/fonts/cormorant-500.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="assets/poster.jpg" as="image" />
+    <link rel="preload" href="assets/poster.jpg?v=4" as="image" />
+    <link rel="preload" href="assets/frames.bin?v=1" as="fetch" crossorigin="anonymous" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <a class="skip" href="#story">Skip to story</a>
-
+    <div class="screen" id="screen">
     <div class="backdrop" aria-hidden="true">
-      <video
-        id="film"
-        class="film"
-        muted
-        playsinline
-        preload="none"
-        poster="assets/poster.jpg"
-        data-src="assets/backdrop.mp4?v=3"
-      ></video>
+      <canvas id="film" class="film" width="1280" height="720"></canvas>
       <div class="shade"></div>
     </div>
 
@@ -65,6 +57,8 @@
       </div>
     </header>
 
+    <div class="scroller" id="scroller">
+    <a class="skip" href="#story">Skip to story</a>
     <main>
       <section class="story" id="story">
         <div class="story-sticky">
@@ -254,6 +248,7 @@
         </footer>
       </div>
     </main>
+    </div>
 
     <a
       class="wa"
@@ -270,7 +265,9 @@
       </svg>
     </a>
 
+    </div>
+
     <audio id="music" src="assets/coat.mp3" autoplay loop preload="auto"></audio>
-    <script src="main.js?v=19" defer></script>
+    <script src="main.js?v=22" defer></script>
   </body>
 </html>

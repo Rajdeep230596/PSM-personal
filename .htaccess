@@ -26,6 +26,19 @@
 
 # This host stamps Last-Modified with the current time. Chrome then rejects
 # the range it needs for the next frame, so the film stays on one chapter.
+<Files "frames.bin">
+  FileETag None
+  <IfModule mod_headers.c>
+    Header always unset ETag
+    Header always unset Last-Modified
+    Header always unset Content-Encoding
+    Header always set Cache-Control "public, max-age=2592000"
+    Header always set Content-Type "application/octet-stream"
+  </IfModule>
+  SetEnv no-gzip 1
+  SetEnv dont-vary 1
+</Files>
+
 <Files "backdrop.mp4">
   FileETag None
   <IfModule mod_headers.c>

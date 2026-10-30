@@ -1,5 +1,7 @@
 const film = document.getElementById("film");
-const remoteSrc = film.dataset.src;
+const filmCtx = film.getContext("2d", { alpha: true });
+const screen = document.getElementById("screen");
+const scroller = document.getElementById("scroller");
 const story = document.getElementById("story");
 const siteFoot = document.querySelector(".site-foot");
 const contact = document.getElementById("contact");
@@ -11,43 +13,52 @@ const nav = document.getElementById("nav");
 const wa = document.querySelector(".wa");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-let playhead = 0;
-let seeking = false;
-let seekWanted = false;
-let scrubbing = false;
-let seekTimer = 0;
+let pictureWidth = 0;
+let pictureHeight = 0;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function viewWidth() {
+  return scroller.clientWidth;
+}
+
+function viewHeight() {
+  return scroller.clientHeight;
+}
+
+function viewTop(element) {
+  return element.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+}
+
 function storyProgress() {
-  const total = story.offsetHeight - window.innerHeight;
+  const total = story.offsetHeight - viewHeight();
   if (total <= 0) return 0;
-  return clamp(-story.getBoundingClientRect().top / total, 0, 1);
+  return clamp(-viewTop(story) / total, 0, 1);
 }
 
 function filmProgress() {
-  const contactTop = contact.getBoundingClientRect().top + window.scrollY;
+  const contactTop = viewTop(contact) + scroller.scrollTop;
   if (contactTop <= 0) return 1;
-  return clamp(window.scrollY / contactTop, 0, 1);
+  return clamp(scroller.scrollTop / contactTop, 0, 1);
 }
 
 function placeTabletForm() {
-  const top = contact.getBoundingClientRect().top;
-  const foot = siteFoot.getBoundingClientRect().top;
-  const locked = top >= -4 && top <= 12 && foot >= window.innerHeight - 4;
-  const live = film.videoWidth > 0 && locked;
+  const top = viewTop(contact);
+  const foot = viewTop(siteFoot);
+  const locked = top >= -4 && top <= 12 && foot >= viewHeight() - 4;
+  const live = pictureWidth > 0 && locked;
   tabletForm.classList.toggle("is-live", live);
   if (!live && tabletForm.contains(document.activeElement)) document.activeElement.blur();
-  if (!film.videoWidth || !film.videoHeight) return;
+  if (!pictureWidth || !pictureHeight) return;
 
   const rect = film.getBoundingClientRect();
-  const scale = Math.max(rect.width / film.videoWidth, rect.height / film.videoHeight);
-  const originX = rect.left + (rect.width - film.videoWidth * scale) / 2;
-  const originY = rect.top + (rect.height - film.videoHeight * scale) / 2;
-  const sx = film.videoWidth / 1920;
-  const sy = film.videoHeight / 1080;
+  const scale = Math.max(rect.width / pictureWidth, rect.height / pictureHeight);
+  const originX = rect.left + (rect.width - pictureWidth * scale) / 2;
+  const originY = rect.top + (rect.height - pictureHeight * scale) / 2;
+  const sx = pictureWidth / 1920;
+  const sy = pictureHeight / 1080;
   const placed = [...tabletForm.querySelectorAll("[data-box]")].map((field) => {
     const [x, y, w, h] = field.dataset.box.split(",").map(Number);
     return {
@@ -59,8 +70,9 @@ function placeTabletForm() {
     };
   });
   const margin = 10;
-  const heavilyCropped = window.innerWidth < 700 || placed.some((item) => {
-    const visible = Math.min(item.left + item.width, window.innerWidth - margin) - Math.max(item.left, margin);
+  const bounds = screen.getBoundingClientRect();
+  const heavilyCropped = viewWidth() < 700 || placed.some((item) => {
+    const visible = Math.min(item.left + item.width, bounds.right - margin) - Math.max(item.left, bounds.left + margin);
     return visible < item.width * 0.62;
   });
   const fits = !heavilyCropped;
@@ -75,12 +87,13 @@ function placeTabletForm() {
       item.field.style.fontSize = "";
       return;
     }
-    const left = Math.max(margin, item.left);
-    const top = Math.max(margin, item.top);
-    const width = Math.max(48, Math.min(item.width, window.innerWidth - margin - left));
-    const height = Math.max(28, Math.min(item.height, window.innerHeight - margin - top));
-    item.field.style.left = `${left}px`;
-    item.field.style.top = `${top}px`;
+    const host = tabletForm.getBoundingClientRect();
+    const left = Math.max(bounds.left + margin, item.left);
+    const top = Math.max(bounds.top + margin, item.top);
+    const width = Math.max(48, Math.min(item.width, bounds.right - margin - left));
+    const height = Math.max(28, Math.min(item.height, bounds.bottom - margin - top));
+    item.field.style.left = `${left - host.left}px`;
+    item.field.style.top = `${top - host.top}px`;
     item.field.style.width = `${width}px`;
     item.field.style.height = `${height}px`;
     const isButton = item.field.classList.contains("tablet-btn");
@@ -110,88 +123,205 @@ function paintChapters(progress) {
   chapterIndex.textContent = `0${active}  —  04`;
 }
 
-function targetTime() {
-  return filmProgress() * Math.max(film.duration - 0.04, 0);
+const frameUrl = "assets/frames.bin?v=1";
+const frameCache = new Map();
+const frameCacheMax = 8;
+const frameFailed = new Set();
+let frameChunks = [];
+let frameReceived = 0;
+let frameCount = 0;
+let frameOffsets = null;
+let frameParsed = false;
+let frameShown = -1;
+let frameWanted = -1;
+let frameDecoding = false;
+let paintQueued = false;
+let motionIndex = -1;
+
+function sliceBytes(start, end) {
+  const out = new Uint8Array(end - start);
+  let pos = 0;
+  let offset = 0;
+  for (const chunk of frameChunks) {
+    const chunkEnd = offset + chunk.length;
+    if (chunkEnd > start && offset < end) {
+      const from = Math.max(0, start - offset);
+      const to = Math.min(chunk.length, end - offset);
+      out.set(chunk.subarray(from, to), pos);
+      pos += to - from;
+    }
+    offset = chunkEnd;
+    if (offset >= end) break;
+  }
+  return out;
 }
 
-function releaseSeek() {
-  seeking = false;
-  window.clearTimeout(seekTimer);
+function frameReady(index) {
+  return frameOffsets !== null && index >= 0 && index < frameCount && frameReceived >= frameOffsets[index + 1];
 }
 
-function stepFilm() {
-  scrubbing = false;
-  if (reduceMotion || !film.duration) return;
-  const seekable = film.seekable.length ? film.seekable.end(film.seekable.length - 1) : 0;
-  if (seekable < 0.5 && film.readyState < 2) return;
+function nearestReady(index) {
+  if (!frameParsed) return -1;
+  if (frameReady(index)) return index;
+  let best = -1;
+  for (let i = 0; i < frameCount; i += 1) {
+    if (!frameReady(i)) continue;
+    if (best < 0 || Math.abs(i - index) < Math.abs(best - index)) best = i;
+  }
+  return best;
+}
 
-  const target = targetTime();
-  const gap = target - playhead;
-  playhead = Math.abs(gap) < 0.008 ? target : playhead + gap * 0.62;
+function trimFrameCache(index) {
+  if (frameCache.size <= frameCacheMax) return;
+  const ranked = [...frameCache.keys()].sort((a, b) => Math.abs(b - index) - Math.abs(a - index));
+  while (frameCache.size > frameCacheMax && ranked.length) {
+    const drop = ranked.shift();
+    const bitmap = frameCache.get(drop);
+    frameCache.delete(drop);
+    if (bitmap && bitmap.close) bitmap.close();
+  }
+}
 
-  if (seeking) {
-    seekWanted = true;
-  } else if (Math.abs(playhead - film.currentTime) > 1 / 60) {
-    seeking = true;
-    seekWanted = false;
-    window.clearTimeout(seekTimer);
-    seekTimer = window.setTimeout(() => {
-      seeking = false;
-      scrub();
-    }, 480);
+function drawFrame(index, bitmap) {
+  filmCtx.drawImage(bitmap, 0, 0, pictureWidth, pictureHeight);
+  frameShown = index;
+  film.dataset.frame = String(index);
+}
+
+function targetFrame() {
+  if (reduceMotion) return Math.max(motionIndex, 0);
+  if (frameCount < 2) return 0;
+  return clamp(Math.round(filmProgress() * (frameCount - 1)), 0, frameCount - 1);
+}
+
+function paintFrame() {
+  const ready = nearestReady(targetFrame());
+  if (ready < 0 || frameFailed.has(ready)) return;
+  frameWanted = ready;
+  if (frameCache.has(ready)) {
+    if (frameShown !== ready) drawFrame(ready, frameCache.get(ready));
+    return;
+  }
+  pumpFrames();
+}
+
+async function pumpFrames() {
+  if (frameDecoding) return;
+  frameDecoding = true;
+  while (frameWanted >= 0 && !frameCache.has(frameWanted) && !frameFailed.has(frameWanted)) {
+    const index = frameWanted;
     try {
-      film.currentTime = playhead;
+      const bitmap = await createImageBitmap(new Blob([sliceBytes(frameOffsets[index], frameOffsets[index + 1])], { type: "image/jpeg" }));
+      frameCache.set(index, bitmap);
+      trimFrameCache(targetFrame());
     } catch (err) {
-      releaseSeek();
+      frameFailed.add(index);
     }
   }
-
-  if (!seeking && (Math.abs(target - film.currentTime) > 1 / 60 || Math.abs(target - playhead) > 0.012)) scrub();
+  frameDecoding = false;
+  const ready = nearestReady(targetFrame());
+  if (ready >= 0 && frameCache.has(ready) && frameShown !== ready) drawFrame(ready, frameCache.get(ready));
+  if (frameWanted >= 0 && !frameCache.has(frameWanted) && !frameFailed.has(frameWanted)) pumpFrames();
 }
 
-function scrub() {
-  if (reduceMotion || scrubbing) return;
-  scrubbing = true;
-  requestAnimationFrame(stepFilm);
+function requestFilm() {
+  if (paintQueued) return;
+  paintQueued = true;
+  requestAnimationFrame(() => {
+    paintQueued = false;
+    paintFrame();
+  });
+}
+
+function parseFrameHeader() {
+  if (frameParsed || frameReceived < 12) return;
+  const head = sliceBytes(0, 12);
+  if (head[0] !== 80 || head[1] !== 83 || head[2] !== 77 || head[3] !== 70) return;
+  const view = new DataView(head.buffer);
+  const count = view.getUint16(10, true);
+  const headerLen = 12 + 4 * (count + 1);
+  if (frameReceived < headerLen) return;
+  pictureWidth = view.getUint16(6, true);
+  pictureHeight = view.getUint16(8, true);
+  frameCount = count;
+  const table = sliceBytes(12, headerLen);
+  const tableView = new DataView(table.buffer);
+  frameOffsets = new Uint32Array(frameCount + 1);
+  for (let i = 0; i <= frameCount; i += 1) frameOffsets[i] = tableView.getUint32(i * 4, true);
+  frameParsed = true;
+  film.width = pictureWidth;
+  film.height = pictureHeight;
+  placeWhatsApp();
+  placeTabletForm();
+  requestFilm();
+}
+
+async function loadFrames() {
+  try {
+    const response = await fetch(frameUrl);
+    if (!response.ok || !response.body) return;
+    const reader = response.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      frameChunks.push(value);
+      frameReceived += value.length;
+      parseFrameHeader();
+      if (frameParsed) requestFilm();
+    }
+    if (frameChunks.length > 1) {
+      const merged = new Uint8Array(frameReceived);
+      let pos = 0;
+      frameChunks.forEach((chunk) => {
+        merged.set(chunk, pos);
+        pos += chunk.length;
+      });
+      frameChunks = [merged];
+    }
+    parseFrameHeader();
+    requestFilm();
+  } catch (err) {
+    filmCue.textContent = "Scroll to unfold";
+  }
 }
 
 function onScroll() {
   const progress = storyProgress();
   progressBar.style.width = `${filmProgress() * 100}%`;
   if (!reduceMotion) paintChapters(progress);
-  nav.classList.toggle("is-solid", story.getBoundingClientRect().bottom < window.innerHeight * 0.9);
-  scrub();
-  placeWhatsApp();
-  placeTabletForm();
+  nav.classList.toggle("is-solid", story.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top < viewHeight() * 0.9);
+  if (!reduceMotion) requestFilm();
+  if (viewTop(contact) < viewHeight() * 1.2) placeTabletForm();
 }
 
 function placeWhatsApp() {
+  if (!pictureWidth || !pictureHeight) return;
   wa.style.left = "";
   wa.style.top = "";
   wa.style.right = "";
   wa.style.bottom = "";
   wa.style.width = "";
   wa.style.height = "";
-  if (!film.videoWidth || !film.videoHeight) return;
 
   const rect = film.getBoundingClientRect();
-  const scale = Math.max(rect.width / film.videoWidth, rect.height / film.videoHeight);
-  const originX = rect.left + (rect.width - film.videoWidth * scale) / 2;
-  const originY = rect.top + (rect.height - film.videoHeight * scale) / 2;
-  const sx = film.videoWidth / 1920;
-  const sy = film.videoHeight / 1080;
+  const scale = Math.max(rect.width / pictureWidth, rect.height / pictureHeight);
+  const originX = rect.left + (rect.width - pictureWidth * scale) / 2;
+  const originY = rect.top + (rect.height - pictureHeight * scale) / 2;
+  const sx = pictureWidth / 1920;
+  const sy = pictureHeight / 1080;
   const markX = 1692 * sx;
   const markY = 822 * sy;
   const markW = 96 * sx;
   const markH = 126 * sy;
   const centerX = originX + (markX + markW / 2) * scale;
   const centerY = originY + (markY + markH / 2) * scale;
+  const bounds = screen.getBoundingClientRect();
   const margin = 12;
   if (
-    centerX < margin ||
-    centerY < margin ||
-    centerX > window.innerWidth - margin ||
-    centerY > window.innerHeight - margin
+    centerX < bounds.left + margin ||
+    centerY < bounds.top + margin ||
+    centerX > bounds.right - margin ||
+    centerY > bounds.bottom - margin
   ) {
     return;
   }
@@ -199,99 +329,27 @@ function placeWhatsApp() {
   const size = wa.offsetWidth;
   wa.style.right = "auto";
   wa.style.bottom = "auto";
-  wa.style.left = `${centerX - size / 2}px`;
-  wa.style.top = `${centerY - size / 2}px`;
-}
-
-function unlockFilm() {
-  film.pause();
-  placeWhatsApp();
-  if (reduceMotion) {
-    film.loop = true;
-    film.play().catch(() => {});
-    return;
-  }
-  onScroll();
+  wa.style.left = `${centerX - bounds.left - size / 2}px`;
+  wa.style.top = `${centerY - bounds.top - size / 2}px`;
 }
 
 const filmCue = document.querySelector(".scroll-cue");
-
-function whenFilmReady(video) {
-  return new Promise((resolve) => {
-    if (video.readyState >= 2) {
-      resolve();
-      return;
+filmCue.textContent = "Scroll to unfold";
+loadFrames();
+if (reduceMotion) {
+  const started = performance.now();
+  const tick = () => {
+    if (frameCount > 1) {
+      motionIndex = Math.floor(((performance.now() - started) / 1000) * 12) % frameCount;
+      requestFilm();
     }
-    video.addEventListener("loadeddata", () => resolve(), { once: true });
-    video.addEventListener("error", () => resolve(), { once: true });
-  });
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
-
-function readFilm(src, onProgress) {
-  const report = typeof onProgress === "function" ? onProgress : () => {};
-  return fetch(src, { priority: "low" }).then(async (response) => {
-    if (!response.ok || !response.body) throw new Error("film");
-    const total = Number(response.headers.get("Content-Length")) || 0;
-    const reader = response.body.getReader();
-    const parts = [];
-    let received = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      parts.push(value);
-      received += value.byteLength;
-      if (total) report(received / total);
-    }
-    report(1);
-    return new Blob(parts, { type: "video/mp4" });
-  });
-}
-
-function mountClip(video, src, onProgress) {
-  return readFilm(src, onProgress).then((blob) => {
-    video.src = URL.createObjectURL(blob);
-    return whenFilmReady(video);
-  });
-}
-
-function beginFilm(attempt) {
-  mountClip(film, remoteSrc, (ratio) => {
-    const pct = String(Math.round(ratio * 100)).padStart(2, "0");
-    filmCue.textContent = `Loading film ${pct}`;
-  })
-    .then(() => {
-      filmCue.textContent = "Scroll to unfold";
-      if (!reduceMotion) onScroll();
-    })
-    .catch(() => {
-      if (attempt < 1) {
-        beginFilm(attempt + 1);
-        return;
-      }
-      film.src = remoteSrc;
-      filmCue.textContent = "Scroll to unfold";
-    });
-}
-
-film.addEventListener("loadedmetadata", unlockFilm);
-film.addEventListener("seeked", () => {
-  releaseSeek();
-  if (!reduceMotion) scrub();
-});
-film.addEventListener("error", releaseSeek);
-film.addEventListener("progress", () => {
-  if (!reduceMotion) scrub();
-});
-film.addEventListener("canplay", () => {
-  if (!reduceMotion) scrub();
-});
-
 document.getElementById("year").textContent = String(new Date().getFullYear());
-
-if (document.readyState === "complete") beginFilm(0);
-else window.addEventListener("load", () => beginFilm(0), { once: true });
 if (!reduceMotion) paintChapters(0);
-window.addEventListener("scroll", onScroll, { passive: true });
+scroller.addEventListener("scroll", onScroll, { passive: true });
 onScroll();
 
 window.addEventListener("resize", () => {
@@ -350,11 +408,14 @@ sound.addEventListener("click", (event) => {
 
 startMusic();
 music.addEventListener("canplay", startMusic);
-["pointerdown", "keydown", "touchstart", "wheel", "scroll"].forEach((type) => {
+["pointerdown", "keydown", "touchstart", "wheel"].forEach((type) => {
   window.addEventListener(type, () => {
     if (music.paused && !muted) startMusic();
   }, { passive: true });
 });
+scroller.addEventListener("scroll", () => {
+  if (music.paused && !muted) startMusic();
+}, { passive: true });
 
 const toggle = document.querySelector(".nav-toggle");
 toggle.addEventListener("click", () => {
