@@ -129,16 +129,6 @@ textarea {
   object-position: center center;
 }
 
-@media (max-width: 899px), (orientation: portrait) {
-  .backdrop {
-    background-size: contain;
-  }
-
-  .film {
-    object-fit: contain;
-  }
-}
-
 .shade {
   position: absolute;
   inset: 0;

@@ -44,14 +44,8 @@ function filmProgress() {
   return clamp(scroller.scrollTop / contactTop, 0, 1);
 }
 
-function frameContains(width, height) {
-  return width < 900 || height > width;
-}
-
 function frameScale(boxW, boxH, imageW, imageH) {
-  return frameContains(boxW, boxH)
-    ? Math.min(boxW / imageW, boxH / imageH)
-    : Math.max(boxW / imageW, boxH / imageH);
+  return Math.max(boxW / imageW, boxH / imageH);
 }
 
 function pictureFit(rect) {
