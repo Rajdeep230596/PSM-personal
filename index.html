@@ -21,11 +21,12 @@
     <link rel="preload" href="assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/poster.jpg?v=4" as="image" />
     <link rel="preload" href="assets/frames.bin?v=1" as="fetch" crossorigin="anonymous" />
-    <link rel="stylesheet" href="styles.css?v=4" />
+    <link rel="stylesheet" href="styles.css?v=6" />
   </head>
   <body>
     <div class="screen" id="screen">
     <div class="backdrop" aria-hidden="true">
+      <canvas id="film-wash" class="film-wash" aria-hidden="true"></canvas>
       <canvas id="film" class="film" width="1280" height="720"></canvas>
       <div class="shade"></div>
     </div>
@@ -268,6 +269,6 @@
     </div>
 
     <audio id="music" src="assets/coat.mp3" autoplay loop preload="auto"></audio>
-    <script src="main.js?v=26" defer></script>
+    <script src="main.js?v=28" defer></script>
   </body>
 </html>

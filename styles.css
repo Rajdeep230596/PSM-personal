@@ -129,6 +129,37 @@ textarea {
   object-position: center center;
 }
 
+.film-wash {
+  display: none;
+}
+
+@media (max-width: 899px) and (orientation: portrait) {
+  .backdrop {
+    background-image: none;
+  }
+
+  .film-wash {
+    display: block;
+    position: absolute;
+    inset: -8%;
+    width: 116%;
+    height: 116%;
+  }
+
+  .film {
+    width: 100%;
+    height: calc(100vw * 0.8);
+    max-height: 70%;
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    object-fit: fill;
+    background: #050607 url("assets/poster.jpg?v=4") center / 100% 100% no-repeat;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
+  }
+}
+
 .shade {
   position: absolute;
   inset: 0;

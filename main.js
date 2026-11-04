@@ -1,5 +1,7 @@
 const film = document.getElementById("film");
 const filmCtx = film.getContext("2d", { alpha: true });
+const wash = document.getElementById("film-wash");
+const washCtx = wash.getContext("2d", { alpha: false });
 const screen = document.getElementById("screen");
 const scroller = document.getElementById("scroller");
 const story = document.getElementById("story");
@@ -48,10 +50,23 @@ function frameScale(boxW, boxH, imageW, imageH) {
   return Math.max(boxW / imageW, boxH / imageH);
 }
 
+function squeezePortrait() {
+  return viewWidth() < 900 && viewHeight() > viewWidth();
+}
+
 function pictureFit(rect) {
+  if (squeezePortrait()) {
+    return {
+      scaleX: rect.width / pictureWidth,
+      scaleY: rect.height / pictureHeight,
+      originX: rect.left,
+      originY: rect.top,
+    };
+  }
   const scale = frameScale(rect.width, rect.height, pictureWidth, pictureHeight);
   return {
-    scale,
+    scaleX: scale,
+    scaleY: scale,
     originX: rect.left + (rect.width - pictureWidth * scale) / 2,
     originY: rect.top + (rect.height - pictureHeight * scale) / 2,
   };
@@ -68,17 +83,17 @@ function placeTabletForm() {
 
   const rect = film.getBoundingClientRect();
   const fit = pictureFit(rect);
-  const { scale, originX, originY } = fit;
+  const { scaleX, scaleY, originX, originY } = fit;
   const sx = pictureWidth / 1920;
   const sy = pictureHeight / 1080;
   const placed = [...tabletForm.querySelectorAll("[data-box]")].map((field) => {
     const [x, y, w, h] = field.dataset.box.split(",").map(Number);
     return {
       field,
-      left: originX + x * sx * scale,
-      top: originY + y * sy * scale,
-      width: w * sx * scale,
-      height: h * sy * scale,
+      left: originX + x * sx * scaleX,
+      top: originY + y * sy * scaleY,
+      width: w * sx * scaleX,
+      height: h * sy * scaleY,
     };
   });
   const margin = 10;
@@ -109,7 +124,7 @@ function placeTabletForm() {
     item.field.style.width = `${width}px`;
     item.field.style.height = `${height}px`;
     const isButton = item.field.classList.contains("tablet-btn");
-    item.field.style.fontSize = `${Math.max(16, (isButton ? 15 : 18) * scale)}px`;
+    item.field.style.fontSize = `${Math.max(16, (isButton ? 15 : 18) * scaleX)}px`;
   });
 }
 
@@ -194,6 +209,24 @@ function trimFrameCache(index) {
   }
 }
 
+function drawWash(bitmap) {
+  if (!squeezePortrait()) return;
+  const rect = screen.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (wash.width !== w || wash.height !== h) {
+    wash.width = w;
+    wash.height = h;
+  }
+  const scale = Math.max(w / bitmap.width, h / bitmap.height) * 1.22;
+  const dw = bitmap.width * scale;
+  const dh = bitmap.height * scale;
+  washCtx.filter = "blur(42px)";
+  washCtx.drawImage(bitmap, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  washCtx.filter = "none";
+}
+
 function drawFrame(index, bitmap) {
   const rect = film.getBoundingClientRect();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -203,12 +236,18 @@ function drawFrame(index, bitmap) {
     film.width = w;
     film.height = h;
   }
-  filmCtx.fillStyle = "#050607";
-  filmCtx.fillRect(0, 0, w, h);
-  const scale = frameScale(rect.width, rect.height, bitmap.width, bitmap.height);
-  const dw = bitmap.width * scale * dpr;
-  const dh = bitmap.height * scale * dpr;
-  filmCtx.drawImage(bitmap, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  filmCtx.clearRect(0, 0, w, h);
+  if (squeezePortrait()) {
+    drawWash(bitmap);
+    filmCtx.drawImage(bitmap, 0, 0, w, h);
+  } else {
+    filmCtx.fillStyle = "#050607";
+    filmCtx.fillRect(0, 0, w, h);
+    const scale = frameScale(rect.width, rect.height, bitmap.width, bitmap.height);
+    const dw = bitmap.width * scale * dpr;
+    const dh = bitmap.height * scale * dpr;
+    filmCtx.drawImage(bitmap, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  }
   frameShown = index;
   film.dataset.frame = String(index);
 }
@@ -328,15 +367,15 @@ function placeWhatsApp() {
 
   const rect = film.getBoundingClientRect();
   const fit = pictureFit(rect);
-  const { scale, originX, originY } = fit;
+  const { scaleX, scaleY, originX, originY } = fit;
   const sx = pictureWidth / 1920;
   const sy = pictureHeight / 1080;
   const markX = 1692 * sx;
   const markY = 822 * sy;
   const markW = 96 * sx;
   const markH = 126 * sy;
-  const centerX = originX + (markX + markW / 2) * scale;
-  const centerY = originY + (markY + markH / 2) * scale;
+  const centerX = originX + (markX + markW / 2) * scaleX;
+  const centerY = originY + (markY + markH / 2) * scaleY;
   const bounds = screen.getBoundingClientRect();
   const margin = 12;
   if (
