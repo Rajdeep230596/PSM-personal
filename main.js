@@ -5,7 +5,7 @@ const washCtx = wash.getContext("2d", { alpha: false });
 const screen = document.getElementById("screen");
 const scroller = document.getElementById("scroller");
 const story = document.getElementById("story");
-const siteFoot = document.querySelector(".site-foot");
+const vendors = document.getElementById("vendors");
 const contact = document.getElementById("contact");
 const tabletForm = document.getElementById("contact-form");
 const chapters = [...document.querySelectorAll(".chapter")];
@@ -75,8 +75,8 @@ let formClosed = false;
 
 function contactOnStage() {
   const top = viewTop(contact);
-  const foot = viewTop(siteFoot);
-  return top <= 48 && foot > viewHeight() * 0.28;
+  const next = viewTop(vendors);
+  return top <= 48 && next > viewHeight() * 0.55;
 }
 
 function placeTabletForm() {
@@ -107,9 +107,9 @@ function paintChapters(progress) {
   });
 }
 
-const frameUrl = "assets/frames.bin?v=1";
+const frameUrl = "assets/frames.bin?v=3";
 const frameCache = new Map();
-const frameCacheMax = 8;
+const frameCacheMax = 40;
 const frameFailed = new Set();
 let frameChunks = [];
 let frameReceived = 0;
@@ -117,8 +117,11 @@ let frameCount = 0;
 let frameOffsets = null;
 let frameParsed = false;
 let frameShown = -1;
-let frameWanted = -1;
-let frameDecoding = false;
+let frameShownKey = "";
+let frameInflight = 0;
+let frameSharp = true;
+let frameSharpTimer = 0;
+const framePending = new Set();
 let paintQueued = false;
 let motionIndex = -1;
 
@@ -144,13 +147,11 @@ function frameReady(index) {
   return frameOffsets !== null && index >= 0 && index < frameCount && frameReceived >= frameOffsets[index + 1];
 }
 
-function nearestReady(index) {
-  if (!frameParsed) return -1;
-  if (frameReady(index)) return index;
+function nearestCached(index) {
+  if (frameCache.has(index)) return index;
   let best = -1;
-  for (let i = 0; i < frameCount; i += 1) {
-    if (!frameReady(i)) continue;
-    if (best < 0 || Math.abs(i - index) < Math.abs(best - index)) best = i;
+  for (const key of frameCache.keys()) {
+    if (best < 0 || Math.abs(key - index) < Math.abs(best - index)) best = key;
   }
   return best;
 }
@@ -176,12 +177,23 @@ function drawWash(bitmap) {
     wash.width = w;
     wash.height = h;
   }
+  washCtx.imageSmoothingEnabled = true;
+  washCtx.imageSmoothingQuality = "low";
   const scale = Math.max(w / bitmap.width, h / bitmap.height) * 1.22;
   const dw = bitmap.width * scale;
   const dh = bitmap.height * scale;
-  washCtx.filter = "blur(42px)";
+  washCtx.globalAlpha = 1;
   washCtx.drawImage(bitmap, (w - dw) / 2, (h - dh) / 2, dw, dh);
-  washCtx.filter = "none";
+}
+
+function drawCover(bitmap) {
+  const rect = film.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const scale = frameScale(rect.width, rect.height, bitmap.width, bitmap.height);
+  const dw = bitmap.width * scale * dpr;
+  const dh = bitmap.height * scale * dpr;
+  filmCtx.globalAlpha = 1;
+  filmCtx.drawImage(bitmap, (film.width - dw) / 2, (film.height - dh) / 2, dw, dh);
 }
 
 function drawFrame(index, bitmap) {
@@ -193,56 +205,97 @@ function drawFrame(index, bitmap) {
     film.width = w;
     film.height = h;
   }
-  filmCtx.clearRect(0, 0, w, h);
+  filmCtx.imageSmoothingEnabled = true;
+  filmCtx.imageSmoothingQuality = frameSharp ? "high" : "medium";
+  filmCtx.globalAlpha = 1;
   if (squeezePortrait()) {
     drawWash(bitmap);
+    filmCtx.clearRect(0, 0, w, h);
     filmCtx.drawImage(bitmap, 0, 0, w, h);
   } else {
     filmCtx.fillStyle = "#050607";
     filmCtx.fillRect(0, 0, w, h);
-    const scale = frameScale(rect.width, rect.height, bitmap.width, bitmap.height);
-    const dw = bitmap.width * scale * dpr;
-    const dh = bitmap.height * scale * dpr;
-    filmCtx.drawImage(bitmap, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    drawCover(bitmap);
   }
   frameShown = index;
   film.dataset.frame = String(index);
 }
 
-function targetFrame() {
+function filmIndex() {
   if (reduceMotion) return Math.max(motionIndex, 0);
   if (frameCount < 2) return 0;
   return clamp(Math.round(filmProgress() * (frameCount - 1)), 0, frameCount - 1);
 }
 
-function paintFrame() {
-  const ready = nearestReady(targetFrame());
-  if (ready < 0 || frameFailed.has(ready)) return;
-  frameWanted = ready;
-  if (frameCache.has(ready)) {
-    if (frameShown !== ready) drawFrame(ready, frameCache.get(ready));
-    return;
-  }
-  pumpFrames();
+function renderFilm() {
+  const index = filmIndex();
+  const base = nearestCached(index);
+  if (base < 0) return false;
+  const key = `${base}:${frameSharp ? 1 : 0}:${squeezePortrait() ? 1 : 0}:${Math.round(film.getBoundingClientRect().width)}`;
+  if (key === frameShownKey) return true;
+  drawFrame(base, frameCache.get(base));
+  frameShownKey = key;
+  return true;
 }
 
-async function pumpFrames() {
-  if (frameDecoding) return;
-  frameDecoding = true;
-  while (frameWanted >= 0 && !frameCache.has(frameWanted) && !frameFailed.has(frameWanted)) {
-    const index = frameWanted;
-    try {
-      const bitmap = await createImageBitmap(new Blob([sliceBytes(frameOffsets[index], frameOffsets[index + 1])], { type: "image/jpeg" }));
-      frameCache.set(index, bitmap);
-      trimFrameCache(targetFrame());
-    } catch (err) {
-      frameFailed.add(index);
-    }
+function nextToDecode(index) {
+  const ahead = 20;
+  for (let step = 0; step <= ahead; step += 1) {
+    const candidate = step === 0 ? index : index + step;
+    if (candidate < 0 || candidate >= frameCount) continue;
+    if (frameCache.has(candidate) || framePending.has(candidate) || frameFailed.has(candidate)) continue;
+    if (!frameReady(candidate)) continue;
+    return candidate;
   }
-  frameDecoding = false;
-  const ready = nearestReady(targetFrame());
-  if (ready >= 0 && frameCache.has(ready) && frameShown !== ready) drawFrame(ready, frameCache.get(ready));
-  if (frameWanted >= 0 && !frameCache.has(frameWanted) && !frameFailed.has(frameWanted)) pumpFrames();
+  const behind = index - 1;
+  if (behind >= 0 && !frameCache.has(behind) && !framePending.has(behind) && !frameFailed.has(behind) && frameReady(behind)) {
+    return behind;
+  }
+  return -1;
+}
+
+function pumpFrames() {
+  if (!frameParsed) return;
+  const index = filmIndex();
+  while (frameInflight < 4) {
+    const want = nextToDecode(index);
+    if (want < 0) break;
+    framePending.add(want);
+    frameInflight += 1;
+    const bytes = sliceBytes(frameOffsets[want], frameOffsets[want + 1]);
+    createImageBitmap(new Blob([bytes], { type: "image/jpeg" }))
+      .then((bitmap) => {
+        framePending.delete(want);
+        frameInflight -= 1;
+        if (Math.abs(want - filmIndex()) > 16 && frameCache.size >= frameCacheMax) {
+          if (bitmap.close) bitmap.close();
+        } else {
+          frameCache.set(want, bitmap);
+          trimFrameCache(filmIndex());
+          renderFilm();
+        }
+        pumpFrames();
+      })
+      .catch(() => {
+        framePending.delete(want);
+        frameFailed.add(want);
+        frameInflight -= 1;
+        pumpFrames();
+      });
+  }
+}
+
+function paintFrame() {
+  if (!frameParsed) return;
+  frameSharp = false;
+  clearTimeout(frameSharpTimer);
+  frameSharpTimer = setTimeout(() => {
+    frameSharp = true;
+    frameShownKey = "";
+    renderFilm();
+  }, 120);
+  renderFilm();
+  pumpFrames();
 }
 
 function requestFilm() {
@@ -382,7 +435,8 @@ function fitScreen() {
 
 function fitStage() {
   fitScreen();
-  if (frameShown >= 0 && frameCache.has(frameShown)) drawFrame(frameShown, frameCache.get(frameShown));
+  frameShownKey = "";
+  if (frameParsed) renderFilm();
   placeWhatsApp();
   placeTabletForm();
 }
@@ -532,7 +586,17 @@ if (!reduceMotion) paintChapters(storyProgress());
     document.querySelector(".contact"),
     [],
   ],
-  [document.querySelector(".directory"), [...document.querySelectorAll(".details > div")]],
+  [
+    document.querySelector(".vendors"),
+    [
+      ...document.querySelectorAll(".vendors .panel-head > *"),
+      ...document.querySelectorAll(".vendors .logo-grid > li"),
+    ],
+  ],
+  [
+    document.querySelector(".directory"),
+    [...document.querySelectorAll(".details > div")],
+  ],
   [document.querySelector(".footer"), [...document.querySelectorAll(".footer > *")]],
 ].forEach(([section, bits]) => {
   markPops(bits.filter(Boolean));

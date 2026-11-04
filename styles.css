@@ -129,6 +129,7 @@ textarea {
   object-position: center center;
 }
 
+.film-wash-wrap,
 .film-wash {
   display: none;
 }
@@ -138,15 +139,28 @@ textarea {
     background-image: none;
   }
 
-  .film-wash {
+  .film-wash-wrap {
     display: block;
     position: absolute;
-    inset: -8%;
-    width: 116%;
-    height: 116%;
+    z-index: 0;
+    inset: -16%;
+    width: 132%;
+    height: 132%;
+    pointer-events: none;
+    -webkit-filter: blur(28px);
+    filter: blur(28px);
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+
+  .film-wash {
+    display: block;
+    width: 100%;
+    height: 100%;
   }
 
   .film {
+    z-index: 1;
     width: 100%;
     height: calc(100vw * 0.8);
     max-height: 70%;
@@ -162,11 +176,14 @@ textarea {
 
 .shade {
   position: absolute;
+  z-index: 2;
   inset: 0;
   background:
     linear-gradient(90deg, rgba(8, 8, 10, 0.42) 0%, rgba(8, 8, 10, 0.16) 46%, rgba(8, 8, 10, 0.05) 100%),
     linear-gradient(180deg, rgba(8, 8, 10, 0.28) 0%, rgba(8, 8, 10, 0.02) 32%, rgba(8, 8, 10, 0.32) 100%);
   pointer-events: none;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
 }
 
 .progress {
@@ -590,6 +607,98 @@ h2 {
   z-index: 4;
 }
 
+.vendors {
+  position: relative;
+  z-index: 3;
+  background: var(--sheet);
+  border-top: 1px solid var(--line);
+}
+
+.logo-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+
+.logo-grid li {
+  display: grid;
+  place-items: center;
+  min-height: 9.5rem;
+  margin: 0;
+  padding: 2.2rem 1.25rem;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.mark {
+  margin: 0;
+  color: var(--ivory);
+  text-align: center;
+  line-height: 0.95;
+}
+
+.mark-porsche {
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: clamp(1.25rem, 1.8vw, 1.7rem);
+  letter-spacing: 0.46em;
+  text-indent: 0.46em;
+  text-transform: uppercase;
+}
+
+.mark-cartier {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: clamp(2.6rem, 3.6vw, 3.5rem);
+  letter-spacing: 0.02em;
+}
+
+.mark-moynat {
+  font-family: var(--serif);
+  font-size: clamp(2rem, 2.8vw, 2.7rem);
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  text-transform: uppercase;
+}
+
+.mark-delvaux {
+  font-family: var(--serif);
+  font-size: clamp(1.7rem, 2.4vw, 2.25rem);
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  text-transform: uppercase;
+}
+
+.mark-poole {
+  font-family: var(--serif);
+  font-size: clamp(1.45rem, 2vw, 1.9rem);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.mark-poole span {
+  display: block;
+  margin-top: 0.45rem;
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: var(--gold);
+}
+
+.mark-christofle {
+  font-family: var(--serif);
+  font-size: clamp(1.8rem, 2.5vw, 2.35rem);
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  text-transform: uppercase;
+}
+
 .directory,
 .footer {
   background: var(--sheet);
@@ -893,6 +1002,10 @@ h2 {
   .nav-links a {
     padding: 0.85rem 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .logo-grid {
+    grid-template-columns: 1fr 1fr;
   }
 
   .story {
