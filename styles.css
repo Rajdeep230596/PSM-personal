@@ -325,17 +325,6 @@ button:focus-visible {
   pointer-events: auto;
 }
 
-.chapter-index {
-  position: absolute;
-  top: calc(var(--nav) + env(safe-area-inset-top) + 1.5rem);
-  left: 8vw;
-  margin: 0;
-  font-size: 0.72rem;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  color: var(--gold);
-}
-
 .kicker {
   margin: 0 0 0.8rem;
   font-size: 0.72rem;
@@ -820,10 +809,6 @@ textarea.tablet-field {
 }
 
 @media (max-height: 520px) and (orientation: landscape) {
-  .chapter-index {
-    display: none;
-  }
-
   .story-sticky {
     padding-top: calc(var(--nav) + 0.4rem);
     padding-bottom: 4.5rem;
@@ -890,10 +875,6 @@ textarea.tablet-field {
     padding-right: max(6vw, env(safe-area-inset-right));
   }
 
-  .chapter-index {
-    left: 6vw;
-  }
-
   h1 {
     font-size: clamp(3.1rem, 14vw, 4.6rem);
     max-width: 8ch;
@@ -921,6 +902,117 @@ textarea.tablet-field {
 
   .footer {
     padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 899px) and (orientation: portrait) {
+  .story-sticky {
+    align-items: stretch;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .shade {
+    background: linear-gradient(
+      180deg,
+      rgba(8, 8, 10, 0.82) 0%,
+      rgba(8, 8, 10, 0.74) calc(50% - min(40vw, 35%) - 2.4rem),
+      rgba(8, 8, 10, 0) calc(50% - min(40vw, 35%)),
+      rgba(8, 8, 10, 0) calc(50% + min(40vw, 35%)),
+      rgba(8, 8, 10, 0.76) calc(50% + min(40vw, 35%) + 1.15rem),
+      rgba(8, 8, 10, 0.86) 100%
+    );
+  }
+
+  .chapter {
+    position: relative;
+    align-self: stretch;
+    max-width: none;
+    height: 100%;
+  }
+
+  .chapter .kicker,
+  .chapter h1,
+  .chapter h2,
+  .chapter .lede,
+  .chapter .body,
+  .chapter .scroll-cue,
+  .chapter .text-link {
+    position: absolute;
+    left: 0;
+    right: 0;
+    margin: 0;
+  }
+
+  .chapter .kicker {
+    top: calc(var(--nav) + env(safe-area-inset-top) + 0.45rem);
+  }
+
+  .chapter h1,
+  .chapter h2 {
+    top: calc(var(--nav) + env(safe-area-inset-top) + 2rem);
+  }
+
+  .chapter .lede,
+  .chapter .body,
+  .chapter .text-link {
+    top: calc(50% + min(40vw, 35%) + 0.85rem);
+  }
+
+  .chapter .scroll-cue {
+    top: calc(50% + min(40vw, 35%) + 5.5rem);
+  }
+
+  .story-sticky h1 {
+    font-size: clamp(2.3rem, 11vw, 3.1rem);
+  }
+
+  .story-sticky h2 {
+    font-size: clamp(1.85rem, 7.6vw, 2.45rem);
+  }
+}
+
+@media (max-width: 899px) and (orientation: portrait) and (max-height: 740px) {
+  .chapter .kicker {
+    top: calc(var(--nav) + env(safe-area-inset-top) + 0.4rem);
+  }
+
+  .chapter h1,
+  .chapter h2 {
+    top: calc(var(--nav) + env(safe-area-inset-top) + 1.65rem);
+  }
+
+  .story-sticky h1 {
+    font-size: 1.8rem;
+  }
+
+  .story-sticky h2 {
+    font-size: 1.32rem;
+  }
+
+  .chapter .lede,
+  .chapter .body {
+    font-size: 0.95rem;
+    line-height: 1.35;
+  }
+}
+
+@media (min-width: 700px) and (max-width: 899px) and (orientation: portrait) {
+  .chapter .kicker {
+    top: calc(var(--nav) + env(safe-area-inset-top) + 0.45rem);
+  }
+
+  .chapter h1,
+  .chapter h2 {
+    top: calc(var(--nav) + env(safe-area-inset-top) + 1.75rem);
+  }
+
+  .story-sticky h1 {
+    font-size: 2.3rem;
+  }
+
+  .story-sticky h2 {
+    font-size: 1.55rem;
   }
 }
 

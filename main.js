@@ -10,7 +10,6 @@ const contact = document.getElementById("contact");
 const tabletForm = document.getElementById("contact-form");
 const chapters = [...document.querySelectorAll(".chapter")];
 const progressBar = document.getElementById("progress-bar");
-const chapterIndex = document.getElementById("chapter-index");
 const nav = document.getElementById("nav");
 const wa = document.querySelector(".wa");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -129,8 +128,7 @@ function placeTabletForm() {
 }
 
 function paintChapters(progress) {
-  let active = 1;
-  chapters.forEach((chapter, index) => {
+  chapters.forEach((chapter) => {
     const from = Number(chapter.dataset.from);
     const to = Number(chapter.dataset.to);
     const fade = 0.05;
@@ -141,13 +139,11 @@ function paintChapters(progress) {
     chapter.style.transform = `translateY(${(1 - opacity) * 22}px)`;
     chapter.classList.toggle("is-on", opacity > 0.45);
     if (opacity > 0.45) {
-      active = index + 1;
       showPops(chapter, true);
     } else if (opacity < 0.08) {
       showPops(chapter, false);
     }
   });
-  chapterIndex.textContent = `0${active}  —  04`;
 }
 
 const frameUrl = "assets/frames.bin?v=1";
