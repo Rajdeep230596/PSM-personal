@@ -21,7 +21,7 @@
     <link rel="preload" href="assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/poster.jpg?v=4" as="image" />
     <link rel="preload" href="assets/frames.bin?v=1" as="fetch" crossorigin="anonymous" />
-    <link rel="stylesheet" href="styles.css?v=8" />
+    <link rel="stylesheet" href="styles.css?v=9" />
   </head>
   <body>
     <div class="screen" id="screen">
@@ -180,19 +180,7 @@
           </div>
         </section>
 
-        <section class="contact" id="contact">
-          <form class="tablet-form" id="contact-form">
-            <input class="tablet-field" data-box="720,456,560,42" name="name" type="text" autocomplete="name" aria-label="Name" placeholder="Name" required />
-            <input class="tablet-field" data-box="760,524,250,42" name="email" type="email" autocomplete="email" aria-label="Email" placeholder="Email" required />
-            <input class="tablet-field" data-box="1188,524,180,42" name="subject" type="text" aria-label="Subject" placeholder="Subject" required />
-            <input class="tablet-field" data-box="820,592,190,42" name="note" type="text" aria-label="Note" placeholder="Note" />
-            <input class="tablet-field" data-box="1205,592,165,42" name="reference" type="text" aria-label="Reference" placeholder="Reference" />
-            <textarea class="tablet-field" data-box="655,700,640,96" name="message" aria-label="Message" placeholder="Message" required></textarea>
-            <button class="tablet-btn tablet-clear" data-box="826,830,240,52" type="reset">Clear</button>
-            <button class="tablet-btn tablet-send" data-box="1086,830,230,52" type="submit">Send</button>
-            <p class="form-status" id="form-status" data-box="620,886,690,32" role="status"></p>
-          </form>
-        </section>
+        <section class="contact" id="contact"></section>
 
         <footer class="site-foot">
           <section class="panel directory" aria-label="Contact details">
@@ -249,6 +237,38 @@
     </main>
     </div>
 
+    <form class="ipad" id="contact-form" aria-labelledby="ipad-title">
+      <div class="ipad-device">
+        <div class="ipad-screen">
+          <button class="ipad-close" type="button" aria-label="Close">Close</button>
+          <p class="kicker">PSM Infinity</p>
+          <h2 id="ipad-title">Begin a conversation.</h2>
+          <label class="ipad-field">
+            <span>Name</span>
+            <input name="name" type="text" autocomplete="name" required />
+          </label>
+          <label class="ipad-field">
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" required />
+          </label>
+          <label class="ipad-field">
+            <span>Country</span>
+            <input name="country" type="text" autocomplete="country-name" required />
+          </label>
+          <label class="ipad-field">
+            <span>Contact</span>
+            <input name="contact" type="tel" autocomplete="tel" inputmode="tel" required />
+          </label>
+          <label class="ipad-field">
+            <span>Message</span>
+            <textarea name="message" rows="4" required></textarea>
+          </label>
+          <p class="form-status" id="form-status" role="status"></p>
+          <button class="ipad-send" type="submit">Send</button>
+        </div>
+      </div>
+    </form>
+
     <a
       class="wa"
       href="https://wa.me/919007431000?text=Hello%20PSM%20Infinity%2C%20I%20would%20like%20to%20connect."
@@ -266,7 +286,7 @@
 
     </div>
 
-    <audio id="music" src="assets/coat.mp3" autoplay loop preload="auto"></audio>
-    <script src="main.js?v=29" defer></script>
+    <audio id="music" src="assets/coat.mp3?v=2" autoplay loop preload="auto"></audio>
+    <script src="main.js?v=31" defer></script>
   </body>
 </html>

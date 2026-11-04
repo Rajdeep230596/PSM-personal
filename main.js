@@ -71,60 +71,21 @@ function pictureFit(rect) {
   };
 }
 
-function placeTabletForm() {
+let formClosed = false;
+
+function contactOnStage() {
   const top = viewTop(contact);
   const foot = viewTop(siteFoot);
-  const locked = top >= -4 && top <= 12 && foot >= viewHeight() - 4;
-  const live = pictureWidth > 0 && locked;
+  return top <= 48 && foot > viewHeight() * 0.28;
+}
+
+function placeTabletForm() {
+  const onStage = contactOnStage();
+  if (!onStage) formClosed = false;
+  const typing = tabletForm.contains(document.activeElement);
+  const live = (onStage || typing) && !formClosed;
   tabletForm.classList.toggle("is-live", live);
   if (!live && tabletForm.contains(document.activeElement)) document.activeElement.blur();
-  if (!pictureWidth || !pictureHeight) return;
-
-  const rect = film.getBoundingClientRect();
-  const fit = pictureFit(rect);
-  const { scaleX, scaleY, originX, originY } = fit;
-  const sx = pictureWidth / 1920;
-  const sy = pictureHeight / 1080;
-  const placed = [...tabletForm.querySelectorAll("[data-box]")].map((field) => {
-    const [x, y, w, h] = field.dataset.box.split(",").map(Number);
-    return {
-      field,
-      left: originX + x * sx * scaleX,
-      top: originY + y * sy * scaleY,
-      width: w * sx * scaleX,
-      height: h * sy * scaleY,
-    };
-  });
-  const margin = 10;
-  const bounds = screen.getBoundingClientRect();
-  const heavilyCropped = viewWidth() < 700 || placed.some((item) => {
-    const visible = Math.min(item.left + item.width, bounds.right - margin) - Math.max(item.left, bounds.left + margin);
-    return visible < item.width * 0.62;
-  });
-  const fits = !heavilyCropped;
-  tabletForm.classList.toggle("is-fit", !fits);
-
-  placed.forEach((item) => {
-    if (!fits) {
-      item.field.style.left = "";
-      item.field.style.top = "";
-      item.field.style.width = "";
-      item.field.style.height = "";
-      item.field.style.fontSize = "";
-      return;
-    }
-    const host = tabletForm.getBoundingClientRect();
-    const left = Math.max(bounds.left + margin, item.left);
-    const top = Math.max(bounds.top + margin, item.top);
-    const width = Math.max(48, Math.min(item.width, bounds.right - margin - left));
-    const height = Math.max(28, Math.min(item.height, bounds.bottom - margin - top));
-    item.field.style.left = `${left - host.left}px`;
-    item.field.style.top = `${top - host.top}px`;
-    item.field.style.width = `${width}px`;
-    item.field.style.height = `${height}px`;
-    const isButton = item.field.classList.contains("tablet-btn");
-    item.field.style.fontSize = `${Math.max(16, (isButton ? 15 : 18) * scaleX)}px`;
-  });
 }
 
 function paintChapters(progress) {
@@ -514,21 +475,27 @@ form.addEventListener("submit", (event) => {
   const data = new FormData(form);
   const name = String(data.get("name") || "").trim();
   const email = String(data.get("email") || "").trim();
-  const subject = String(data.get("subject") || "").trim();
-  const note = String(data.get("note") || "").trim();
-  const reference = String(data.get("reference") || "").trim();
+  const country = String(data.get("country") || "").trim();
+  const contactNo = String(data.get("contact") || "").trim();
   const message = String(data.get("message") || "").trim();
-  const lines = ["Hello PSM Infinity,", "", `Name: ${name}`, `Email: ${email}`, `Subject: ${subject}`];
-  if (note) lines.push(`Note: ${note}`);
-  if (reference) lines.push(`Reference: ${reference}`);
-  lines.push("", message);
+  const lines = [
+    "Hello PSM Infinity,",
+    "",
+    `Name: ${name}`,
+    `Email: ${email}`,
+    `Country: ${country}`,
+    `Contact: ${contactNo}`,
+    "",
+    message,
+  ];
   const url = `https://wa.me/919007431000?text=${encodeURIComponent(lines.join("\n"))}`;
   const opened = window.open(url, "_blank", "noopener");
   if (!opened) window.location.href = url;
   status.textContent = "WhatsApp is opening.";
 });
-form.addEventListener("reset", () => {
-  status.textContent = "";
+form.querySelector(".ipad-close").addEventListener("click", () => {
+  formClosed = true;
+  placeTabletForm();
 });
 
 function markPops(elements) {
