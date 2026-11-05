@@ -113,7 +113,7 @@ const webKitFilm = (() => {
   const safari = /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|Android/.test(ua);
   return iOS || safari;
 })();
-const frameUrl = "assets/frames.bin?v=4";
+const frameUrl = "assets/frames.bin?v=5";
 const frameCache = new Map();
 const frameCacheMax = webKitFilm ? 14 : 40;
 const frameDecodeAhead = webKitFilm ? 10 : 20;
