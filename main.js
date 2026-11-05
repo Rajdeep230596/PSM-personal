@@ -118,12 +118,18 @@ const frameCache = new Map();
 const frameCacheMax = webKitFilm ? 14 : 40;
 const frameDecodeAhead = webKitFilm ? 10 : 20;
 const frameDecodeSlots = webKitFilm ? 2 : 4;
+const frameFetchMax = webKitFilm ? 2 : 3;
 const frameFailed = new Set();
+const frameBytes = new Map();
+const frameAbort = new Map();
+const frameTries = new Map();
 let frameChunks = [];
 let frameReceived = 0;
 let frameCount = 0;
 let frameOffsets = null;
 let frameParsed = false;
+let frameStream = false;
+let frameFetchSlots = 0;
 let frameShown = -1;
 let frameShownKey = "";
 let frameInflight = 0;
@@ -156,7 +162,7 @@ function sliceBytes(start, end) {
 }
 
 function frameReady(index) {
-  return frameOffsets !== null && index >= 0 && index < frameCount && frameReceived >= frameOffsets[index + 1];
+  return frameBytes.has(index);
 }
 
 function nearestCached(index) {
@@ -240,6 +246,7 @@ function drawFrame(index, bitmap) {
   }
   frameShown = index;
   film.dataset.frame = String(index);
+  armMusic();
 }
 
 function filmIndex() {
@@ -334,14 +341,16 @@ function pumpFrames() {
   while (frameInflight < frameDecodeSlots) {
     const want = nextToDecode(index);
     if (want < 0) break;
+    const bytes = frameBytes.get(want);
+    if (!bytes) break;
     framePending.add(want);
     frameInflight += 1;
-    const bytes = sliceBytes(frameOffsets[want], frameOffsets[want + 1]);
     decodeJpeg(bytes)
       .then((bitmap) => {
         framePending.delete(want);
         frameInflight -= 1;
         const drifted = Math.abs(want - filmIndex()) > frameDecodeAhead + 2;
+        frameBytes.delete(want);
         if (drifted && frameCache.size >= frameCacheMax) {
           if (bitmap.close) bitmap.close();
           else if ("src" in bitmap) bitmap.src = "";
@@ -375,6 +384,7 @@ function paintFrame() {
 }
 
 function requestFilm() {
+  scheduleFrames();
   if (webKitFilm) {
     paintFrame();
     return;
@@ -408,30 +418,159 @@ function parseFrameHeader() {
   requestFilm();
 }
 
+function harvestFrames() {
+  if (!frameParsed || !frameOffsets) return;
+  for (let index = 0; index < frameCount; index += 1) {
+    if (frameBytes.has(index)) continue;
+    if (frameReceived < frameOffsets[index + 1]) break;
+    frameBytes.set(index, sliceBytes(frameOffsets[index], frameOffsets[index + 1]));
+  }
+}
+
+function headerLength(buf) {
+  if (buf.length < 12) return 0;
+  if (buf[0] !== 80 || buf[1] !== 83 || buf[2] !== 77 || buf[3] !== 70) return 0;
+  const count = new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getUint16(10, true);
+  return 12 + 4 * (count + 1);
+}
+
+function adoptHeader(buf) {
+  const needed = headerLength(buf);
+  if (!needed || buf.length < needed) return false;
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  pictureWidth = view.getUint16(6, true);
+  pictureHeight = view.getUint16(8, true);
+  frameCount = view.getUint16(10, true);
+  frameOffsets = new Uint32Array(frameCount + 1);
+  for (let i = 0; i <= frameCount; i += 1) frameOffsets[i] = view.getUint32(12 + i * 4, true);
+  frameParsed = true;
+  placeWhatsApp();
+  placeTabletForm();
+  return true;
+}
+
+function wantedFrames() {
+  const index = filmIndex();
+  const list = [];
+  const seen = new Set();
+  const push = (n) => {
+    if (n < 0 || n >= frameCount || seen.has(n)) return;
+    seen.add(n);
+    list.push(n);
+  };
+  push(index);
+  for (let step = 1; step <= frameDecodeAhead; step += 1) push(index + step);
+  push(index - 1);
+  return list;
+}
+
+async function fetchRange(start, end, signal) {
+  const response = await fetch(frameUrl, { headers: { Range: `bytes=${start}-${end}` }, signal });
+  if (!response.ok) throw new Error(String(response.status));
+  if (response.status !== 206) {
+    if (response.body) response.body.cancel();
+    return null;
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+async function consumeFrameResponse(response) {
+  if (!response.ok || !response.body) return;
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    frameChunks.push(value);
+    frameReceived += value.length;
+    parseFrameHeader();
+    harvestFrames();
+    if (frameParsed) requestFilm();
+  }
+  if (frameChunks.length > 1) {
+    const merged = new Uint8Array(frameReceived);
+    let pos = 0;
+    frameChunks.forEach((chunk) => {
+      merged.set(chunk, pos);
+      pos += chunk.length;
+    });
+    frameChunks = [merged];
+  }
+  parseFrameHeader();
+  harvestFrames();
+  requestFilm();
+}
+
+async function readFullStream() {
+  if (frameStream) return;
+  frameStream = true;
+  const response = await fetch(frameUrl);
+  await consumeFrameResponse(response);
+}
+
+function scheduleFrames() {
+  if (!frameParsed || frameStream) return;
+  const want = wantedFrames();
+  const wanted = new Set(want);
+  frameAbort.forEach((controller, index) => {
+    if (wanted.has(index)) return;
+    controller.abort();
+  });
+  frameBytes.forEach((bytes, index) => {
+    if (wanted.has(index) || framePending.has(index)) return;
+    frameBytes.delete(index);
+  });
+  for (let i = 0; i < want.length; i += 1) {
+    if (frameFetchSlots >= frameFetchMax) return;
+    const index = want[i];
+    if (frameBytes.has(index) || frameCache.has(index) || frameAbort.has(index) || frameFailed.has(index)) continue;
+    const controller = new AbortController();
+    frameAbort.set(index, controller);
+    frameFetchSlots += 1;
+    const start = frameOffsets[index];
+    const end = frameOffsets[index + 1] - 1;
+    fetchRange(start, end, controller.signal)
+      .then((buf) => {
+        if (controller.signal.aborted) return;
+        if (!buf) {
+          readFullStream();
+          return;
+        }
+        const expect = end - start + 1;
+        if (buf.length < expect) throw new Error("short");
+        frameBytes.set(index, buf.slice(0, expect));
+        requestFilm();
+      })
+      .catch((err) => {
+        if (err && err.name === "AbortError") return;
+        const tries = (frameTries.get(index) || 0) + 1;
+        frameTries.set(index, tries);
+        if (tries >= 2 && !frameStream) frameFailed.add(index);
+      })
+      .finally(() => {
+        frameAbort.delete(index);
+        frameFetchSlots -= 1;
+        scheduleFrames();
+      });
+  }
+}
+
 async function loadFrames() {
   try {
-    const response = await fetch(frameUrl);
-    if (!response.ok || !response.body) return;
-    const reader = response.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      frameChunks.push(value);
-      frameReceived += value.length;
-      parseFrameHeader();
-      if (frameParsed) requestFilm();
+    let head = await fetchRange(0, 16383);
+    if (!head) {
+      await readFullStream();
+      return;
     }
-    if (frameChunks.length > 1) {
-      const merged = new Uint8Array(frameReceived);
-      let pos = 0;
-      frameChunks.forEach((chunk) => {
-        merged.set(chunk, pos);
-        pos += chunk.length;
-      });
-      frameChunks = [merged];
+    const needed = headerLength(head);
+    if (needed > head.length) {
+      head = await fetchRange(0, needed - 1);
+      if (!head) {
+        await readFullStream();
+        return;
+      }
     }
-    parseFrameHeader();
-    requestFilm();
+    if (!adoptHeader(head)) return;
+    scheduleFrames();
   } catch (err) {
     paintCue();
   }
@@ -582,8 +721,20 @@ function paintSound() {
   sound.setAttribute("aria-label", playing ? "Mute music" : "Unmute music");
 }
 
+let musicArmed = false;
+
+function armMusic() {
+  if (musicArmed) return;
+  musicArmed = true;
+  startMusic();
+}
+
 function startMusic() {
   if (muted) return;
+  if (music.preload !== "auto") {
+    music.preload = "auto";
+    music.load();
+  }
   music.muted = false;
   music.volume = 0.5;
   const pending = music.play();
@@ -607,7 +758,7 @@ sound.addEventListener("click", (event) => {
   startMusic();
 });
 
-startMusic();
+setTimeout(armMusic, 5000);
 music.addEventListener("canplay", startMusic);
 ["pointerdown", "keydown", "touchstart", "wheel"].forEach((type) => {
   window.addEventListener(type, () => {
