@@ -9,7 +9,7 @@
   --serif: "Cormorant Garamond", "Times New Roman", serif;
   --sans: "Outfit", "Segoe UI", sans-serif;
   --nav: 5.2rem;
-  --screen-w: 100vw;
+  --screen-w: 100%;
   --screen-h: 100dvh;
 }
 
@@ -42,16 +42,18 @@
 }
 
 html {
-  scroll-behavior: smooth;
-  overflow: hidden;
+  scroll-behavior: auto;
+  overflow: clip;
   height: 100%;
+  width: 100%;
   background: #000;
 }
 
 body {
   margin: 0;
   height: 100%;
-  overflow: hidden;
+  width: 100%;
+  overflow: clip;
   background: #000;
   color: var(--ivory);
   font-family: var(--sans);
@@ -64,17 +66,20 @@ body {
   inset: 0;
   width: var(--screen-w);
   height: var(--screen-h);
-  margin: auto;
-  overflow: hidden;
+  margin: 0;
+  overflow: clip;
   background: var(--ink);
 }
 
 .scroller {
   position: relative;
   z-index: 1;
-  height: 100%;
-  overflow: auto;
-  scroll-behavior: smooth;
+  height: var(--screen-h);
+  overflow-x: clip;
+  overflow-y: auto;
+  scroll-behavior: auto;
+  overscroll-behavior: none;
+  overflow-anchor: none;
 }
 
 img {
@@ -118,7 +123,7 @@ textarea {
   position: absolute;
   inset: 0;
   z-index: 0;
-  background: #050607 url("assets/poster.jpg?v=4") center / cover no-repeat;
+  background: #050607 url("assets/poster.jpg?v=5") center / cover no-repeat;
 }
 
 .film {
@@ -127,6 +132,8 @@ textarea {
   height: 100%;
   object-fit: cover;
   object-position: center center;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
 }
 
 .film-wash-wrap,
@@ -168,7 +175,7 @@ textarea {
     inset: 0;
     margin: auto;
     object-fit: fill;
-    background: #050607 url("assets/poster.jpg?v=4") center / 100% 100% no-repeat;
+    background: #050607 url("assets/poster.jpg?v=5") center / 100% 100% no-repeat;
     -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
     mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
   }
@@ -334,12 +341,18 @@ button:focus-visible {
   max-width: min(38rem, 100%);
   align-self: end;
   opacity: 0;
-  transform: translateY(1.4rem);
+  transform: none;
   pointer-events: none;
 }
 
 .chapter.is-on {
   pointer-events: auto;
+}
+
+.chapter .pop,
+.chapter .pop.is-in {
+  transform: none;
+  animation-name: pop-fade;
 }
 
 .kicker {
@@ -430,7 +443,6 @@ h2 {
   z-index: 2;
   height: var(--screen-h);
   padding: 0;
-  overflow: hidden;
 }
 
 .ipad {
@@ -605,13 +617,34 @@ h2 {
 .site-foot {
   position: relative;
   z-index: 4;
+  background-color: var(--sheet);
+  isolation: isolate;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
 }
 
 .vendors {
   position: relative;
   z-index: 3;
-  background: var(--sheet);
+  background-color: var(--sheet);
   border-top: 1px solid var(--line);
+  isolation: isolate;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+
+.vendors::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background-color: var(--sheet);
+  pointer-events: none;
+}
+
+.vendors > * {
+  position: relative;
+  z-index: 1;
 }
 
 .logo-grid {
@@ -619,7 +652,7 @@ h2 {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-top: 1px solid var(--line);
   border-left: 1px solid var(--line);
 }
@@ -627,15 +660,18 @@ h2 {
 .logo-grid li {
   display: grid;
   place-items: center;
+  min-width: 0;
   min-height: 9.5rem;
   margin: 0;
   padding: 2.2rem 1.25rem;
+  background-color: var(--sheet);
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
 
 .mark {
   margin: 0;
+  max-width: 100%;
   color: var(--ivory);
   text-align: center;
   line-height: 0.95;
@@ -1005,7 +1041,40 @@ h2 {
   }
 
   .logo-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .logo-grid li {
+    padding: 1.5rem 0.4rem;
+  }
+
+  .mark-porsche {
+    font-size: 0.92rem;
+    letter-spacing: 0.2em;
+    text-indent: 0.2em;
+  }
+
+  .mark-cartier {
+    font-size: 2.2rem;
+  }
+
+  .mark-moynat,
+  .mark-delvaux,
+  .mark-christofle {
+    font-size: 1.15rem;
+    letter-spacing: 0.12em;
+    text-indent: 0.12em;
+  }
+
+  .mark-poole {
+    font-size: 1.05rem;
+    letter-spacing: 0.08em;
+  }
+
+  .scroll-cue {
+    max-width: 16rem;
+    letter-spacing: 0.14em;
+    line-height: 1.45;
   }
 
   .story {
@@ -1106,6 +1175,9 @@ h2 {
 
   .chapter .scroll-cue {
     top: calc(50% + min(40vw, 35%) + 5.5rem);
+    max-width: 16rem;
+    letter-spacing: 0.14em;
+    line-height: 1.45;
   }
 
   .story-sticky h1 {
@@ -1169,6 +1241,15 @@ h2 {
 .pop.is-in {
   animation: pop-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: var(--pop-delay, 0ms);
+}
+
+@keyframes pop-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes pop-up {

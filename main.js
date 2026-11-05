@@ -97,7 +97,7 @@ function paintChapters(progress) {
     const exit = to >= 1 ? 1 : clamp((to - progress) / fade, 0, 1);
     const opacity = Math.min(enter, exit);
     chapter.style.opacity = String(opacity);
-    chapter.style.transform = `translateY(${(1 - opacity) * 22}px)`;
+    chapter.style.transform = "none";
     chapter.classList.toggle("is-on", opacity > 0.45);
     if (opacity > 0.45) {
       showPops(chapter, true);
@@ -107,9 +107,17 @@ function paintChapters(progress) {
   });
 }
 
-const frameUrl = "assets/frames.bin?v=3";
+const webKitFilm = (() => {
+  const ua = navigator.userAgent;
+  const iOS = /iP(hone|ad|od)/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const safari = /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|Android/.test(ua);
+  return iOS || safari;
+})();
+const frameUrl = "assets/frames.bin?v=4";
 const frameCache = new Map();
-const frameCacheMax = 40;
+const frameCacheMax = webKitFilm ? 14 : 40;
+const frameDecodeAhead = webKitFilm ? 10 : 20;
+const frameDecodeSlots = webKitFilm ? 2 : 4;
 const frameFailed = new Set();
 let frameChunks = [];
 let frameReceived = 0;
@@ -124,6 +132,10 @@ let frameSharpTimer = 0;
 const framePending = new Set();
 let paintQueued = false;
 let motionIndex = -1;
+let stageW = 0;
+let stageH = 0;
+let filmCssW = 0;
+let filmCssH = 0;
 
 function sliceBytes(start, end) {
   const out = new Uint8Array(end - start);
@@ -161,18 +173,25 @@ function trimFrameCache(index) {
   const ranked = [...frameCache.keys()].sort((a, b) => Math.abs(b - index) - Math.abs(a - index));
   while (frameCache.size > frameCacheMax && ranked.length) {
     const drop = ranked.shift();
+    if (drop === index || drop === frameShown) continue;
     const bitmap = frameCache.get(drop);
     frameCache.delete(drop);
     if (bitmap && bitmap.close) bitmap.close();
+    else if (bitmap && "src" in bitmap) bitmap.src = "";
   }
+}
+
+function filmDpr() {
+  return Math.min(window.devicePixelRatio || 1, 2);
 }
 
 function drawWash(bitmap) {
   if (!squeezePortrait()) return;
-  const rect = screen.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = Math.max(1, Math.round(rect.width * dpr));
-  const h = Math.max(1, Math.round(rect.height * dpr));
+  const cssW = stageW || screen.getBoundingClientRect().width;
+  const cssH = stageH || screen.getBoundingClientRect().height;
+  const dpr = filmDpr();
+  const w = Math.max(1, Math.round(cssW * dpr));
+  const h = Math.max(1, Math.round(cssH * dpr));
   if (wash.width !== w || wash.height !== h) {
     wash.width = w;
     wash.height = h;
@@ -187,9 +206,10 @@ function drawWash(bitmap) {
 }
 
 function drawCover(bitmap) {
-  const rect = film.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const scale = frameScale(rect.width, rect.height, bitmap.width, bitmap.height);
+  const dpr = filmDpr();
+  const cssW = filmCssW || film.getBoundingClientRect().width;
+  const cssH = filmCssH || film.getBoundingClientRect().height;
+  const scale = frameScale(cssW, cssH, bitmap.width, bitmap.height);
   const dw = bitmap.width * scale * dpr;
   const dh = bitmap.height * scale * dpr;
   filmCtx.globalAlpha = 1;
@@ -197,10 +217,11 @@ function drawCover(bitmap) {
 }
 
 function drawFrame(index, bitmap) {
-  const rect = film.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = Math.max(1, Math.round(rect.width * dpr));
-  const h = Math.max(1, Math.round(rect.height * dpr));
+  const dpr = filmDpr();
+  const cssW = filmCssW || film.getBoundingClientRect().width;
+  const cssH = filmCssH || film.getBoundingClientRect().height;
+  const w = Math.max(1, Math.round(cssW * dpr));
+  const h = Math.max(1, Math.round(cssH * dpr));
   if (film.width !== w || film.height !== h) {
     film.width = w;
     film.height = h;
@@ -231,7 +252,8 @@ function renderFilm() {
   const index = filmIndex();
   const base = nearestCached(index);
   if (base < 0) return false;
-  const key = `${base}:${frameSharp ? 1 : 0}:${squeezePortrait() ? 1 : 0}:${Math.round(film.getBoundingClientRect().width)}`;
+  if (!filmCssW) measureFilmBox();
+  const key = `${base}:${frameSharp ? 1 : 0}:${squeezePortrait() ? 1 : 0}:${Math.round(filmCssW)}`;
   if (key === frameShownKey) return true;
   drawFrame(base, frameCache.get(base));
   frameShownKey = key;
@@ -239,8 +261,7 @@ function renderFilm() {
 }
 
 function nextToDecode(index) {
-  const ahead = 20;
-  for (let step = 0; step <= ahead; step += 1) {
+  for (let step = 0; step <= frameDecodeAhead; step += 1) {
     const candidate = step === 0 ? index : index + step;
     if (candidate < 0 || candidate >= frameCount) continue;
     if (frameCache.has(candidate) || framePending.has(candidate) || frameFailed.has(candidate)) continue;
@@ -254,21 +275,76 @@ function nextToDecode(index) {
   return -1;
 }
 
+function decodeWithImage(blob) {
+  const url = URL.createObjectURL(blob);
+  const image = new Image();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      image.onload = null;
+      image.onerror = null;
+      URL.revokeObjectURL(url);
+      reject(new Error("timeout"));
+    }, 4000);
+    image.onload = () => {
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      reject(new Error("decode"));
+    };
+    image.src = url;
+  });
+}
+
+function decodeJpeg(bytes) {
+  const blob = new Blob([bytes], { type: "image/jpeg" });
+  if (typeof createImageBitmap !== "function") return decodeWithImage(blob);
+  let settled = false;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      if (webKitFilm) decodeWithImage(blob).then(resolve, reject);
+      else reject(new Error("timeout"));
+    }, webKitFilm ? 1800 : 8000);
+    createImageBitmap(blob).then((bitmap) => {
+      if (settled) {
+        if (bitmap.close) bitmap.close();
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(bitmap);
+    }, (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (webKitFilm) decodeWithImage(blob).then(resolve, reject);
+      else reject(err);
+    });
+  });
+}
+
 function pumpFrames() {
   if (!frameParsed) return;
   const index = filmIndex();
-  while (frameInflight < 4) {
+  while (frameInflight < frameDecodeSlots) {
     const want = nextToDecode(index);
     if (want < 0) break;
     framePending.add(want);
     frameInflight += 1;
     const bytes = sliceBytes(frameOffsets[want], frameOffsets[want + 1]);
-    createImageBitmap(new Blob([bytes], { type: "image/jpeg" }))
+    decodeJpeg(bytes)
       .then((bitmap) => {
         framePending.delete(want);
         frameInflight -= 1;
-        if (Math.abs(want - filmIndex()) > 16 && frameCache.size >= frameCacheMax) {
+        const drifted = Math.abs(want - filmIndex()) > frameDecodeAhead + 2;
+        if (drifted && frameCache.size >= frameCacheMax) {
           if (bitmap.close) bitmap.close();
+          else if ("src" in bitmap) bitmap.src = "";
         } else {
           frameCache.set(want, bitmap);
           trimFrameCache(filmIndex());
@@ -276,10 +352,10 @@ function pumpFrames() {
         }
         pumpFrames();
       })
-      .catch(() => {
+      .catch((err) => {
         framePending.delete(want);
-        frameFailed.add(want);
         frameInflight -= 1;
+        if (!err || err.message !== "timeout") frameFailed.add(want);
         pumpFrames();
       });
   }
@@ -299,6 +375,10 @@ function paintFrame() {
 }
 
 function requestFilm() {
+  if (webKitFilm) {
+    paintFrame();
+    return;
+  }
   if (paintQueued) return;
   paintQueued = true;
   requestAnimationFrame(() => {
@@ -353,7 +433,7 @@ async function loadFrames() {
     parseFrameHeader();
     requestFilm();
   } catch (err) {
-    filmCue.textContent = "Scroll to unfold";
+    paintCue();
   }
 }
 
@@ -405,7 +485,14 @@ function placeWhatsApp() {
 }
 
 const filmCue = document.querySelector(".scroll-cue");
-filmCue.textContent = "Scroll to unfold";
+const tiltCue = window.matchMedia("(max-width: 899px) and (orientation: portrait), (max-width: 860px)");
+
+function paintCue() {
+  filmCue.textContent = tiltCue.matches ? "Tilt the device for a better experience" : "Scroll to unfold";
+}
+
+paintCue();
+tiltCue.addEventListener("change", paintCue);
 loadFrames();
 if (reduceMotion) {
   const started = performance.now();
@@ -420,23 +507,42 @@ if (reduceMotion) {
 }
 function fitScreen() {
   const viewport = window.visualViewport;
-  const fullW = viewport ? viewport.width : window.innerWidth;
-  const fullH = viewport ? viewport.height : window.innerHeight;
-  const offsetTop = viewport ? viewport.offsetTop : 0;
-  const offsetLeft = viewport ? viewport.offsetLeft : 0;
+  const fullW = Math.round(viewport ? viewport.width : window.innerWidth);
+  const fullH = Math.round(viewport ? viewport.height : window.innerHeight);
   document.documentElement.style.setProperty("--screen-w", `${fullW}px`);
   document.documentElement.style.setProperty("--screen-h", `${fullH}px`);
-  screen.style.top = `${offsetTop}px`;
-  screen.style.left = `${offsetLeft}px`;
-  screen.style.right = "auto";
-  screen.style.bottom = "auto";
+  stageW = fullW;
+  stageH = fullH;
+  screen.style.top = "0";
+  screen.style.left = "0";
+  screen.style.right = "0";
+  screen.style.bottom = "0";
+  screen.style.width = `${fullW}px`;
+  screen.style.height = `${fullH}px`;
   screen.style.margin = "0";
+  screen.style.transform = "none";
+  const changed = fullW !== fitScreen.width || fullH !== fitScreen.height;
+  fitScreen.width = fullW;
+  fitScreen.height = fullH;
+  return changed;
+}
+
+function measureFilmBox() {
+  const rect = film.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) {
+    filmCssW = rect.width;
+    filmCssH = rect.height;
+  }
 }
 
 function fitStage() {
   fitScreen();
+  measureFilmBox();
   frameShownKey = "";
-  if (frameParsed) renderFilm();
+  if (frameParsed) {
+    renderFilm();
+    pumpFrames();
+  }
   placeWhatsApp();
   placeTabletForm();
 }
@@ -449,10 +555,14 @@ onScroll();
 
 window.addEventListener("resize", () => {
   fitStage();
+  paintCue();
   if (!reduceMotion) onScroll();
 });
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", fitStage);
+  window.visualViewport.addEventListener("scroll", () => {
+    if (fitScreen()) fitStage();
+  });
 }
 placeWhatsApp();
 placeTabletForm();
