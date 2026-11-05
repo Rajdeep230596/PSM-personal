@@ -123,7 +123,7 @@ textarea {
   position: absolute;
   inset: 0;
   z-index: 0;
-  background: #050607 url("assets/poster.jpg?v=5") center / cover no-repeat;
+  background: #050607 url("assets/poster.jpg?v=6") center / cover no-repeat;
 }
 
 .film {
@@ -142,11 +142,11 @@ textarea {
 }
 
 @media (max-width: 899px) and (orientation: portrait) {
-  .backdrop {
+  html:not(.force-landscape) .backdrop {
     background-image: none;
   }
 
-  .film-wash-wrap {
+  html:not(.force-landscape) .film-wash-wrap {
     display: block;
     position: absolute;
     z-index: 0;
@@ -160,13 +160,13 @@ textarea {
     transform: translateZ(0);
   }
 
-  .film-wash {
+  html:not(.force-landscape) .film-wash {
     display: block;
     width: 100%;
     height: 100%;
   }
 
-  .film {
+  html:not(.force-landscape) .film {
     z-index: 1;
     width: 100%;
     height: calc(100vw * 0.8);
@@ -175,7 +175,7 @@ textarea {
     inset: 0;
     margin: auto;
     object-fit: fill;
-    background: #050607 url("assets/poster.jpg?v=5") center / 100% 100% no-repeat;
+    background: #050607 url("assets/poster.jpg?v=6") center / 100% 100% no-repeat;
     -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
     mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
   }
@@ -407,10 +407,33 @@ h2 {
 
 .scroll-cue {
   margin: 2rem 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
   font-size: 0.72rem;
   letter-spacing: 0.24em;
   text-transform: uppercase;
+  text-align: left;
   color: var(--gold);
+  cursor: default;
+}
+
+.scroll-cue:not(.is-cta) {
+  pointer-events: none;
+}
+
+.scroll-cue.is-cta {
+  cursor: pointer;
+  max-width: 16rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--gold);
+  background: rgba(9, 10, 12, 0.55);
+}
+
+.scroll-cue.is-cta:hover,
+.scroll-cue.is-cta:focus-visible {
+  color: var(--ink);
+  background: var(--gold);
 }
 
 .text-link {
@@ -443,6 +466,42 @@ h2 {
   z-index: 2;
   height: var(--screen-h);
   padding: 0;
+}
+
+.connect-cta {
+  position: absolute;
+  z-index: 60;
+  left: 50%;
+  top: 50%;
+  margin: 0;
+  min-height: 2.85rem;
+  padding: 0.85rem 1.7rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--gold);
+  color: var(--ink);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, calc(-50% + 0.6rem));
+}
+
+.connect-cta.is-live {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.35s ease, transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.connect-cta:hover,
+.connect-cta:focus-visible {
+  background: var(--ivory);
 }
 
 .ipad {
@@ -1120,13 +1179,13 @@ h2 {
 }
 
 @media (max-width: 899px) and (orientation: portrait) {
-  .story-sticky {
+  html:not(.force-landscape) .story-sticky {
     align-items: stretch;
     padding-top: 0;
     padding-bottom: 0;
   }
 
-  .shade {
+  html:not(.force-landscape) .shade {
     background: linear-gradient(
       180deg,
       rgba(8, 8, 10, 0.82) 0%,
@@ -1138,98 +1197,125 @@ h2 {
     );
   }
 
-  .chapter {
+  html:not(.force-landscape) .chapter {
     position: relative;
     align-self: stretch;
     max-width: none;
     height: 100%;
   }
 
-  .chapter .kicker,
-  .chapter h1,
-  .chapter h2,
-  .chapter .lede,
-  .chapter .body,
-  .chapter .scroll-cue,
-  .chapter .text-link {
+  html:not(.force-landscape) .chapter .kicker,
+  html:not(.force-landscape) .chapter h1,
+  html:not(.force-landscape) .chapter h2,
+  html:not(.force-landscape) .chapter .lede,
+  html:not(.force-landscape) .chapter .body,
+  html:not(.force-landscape) .chapter .scroll-cue,
+  html:not(.force-landscape) .chapter .text-link {
     position: absolute;
     left: 0;
     right: 0;
     margin: 0;
   }
 
-  .chapter .kicker {
+  html:not(.force-landscape) .chapter .kicker {
     top: calc(var(--nav) + env(safe-area-inset-top) + 0.45rem);
   }
 
-  .chapter h1,
-  .chapter h2 {
+  html:not(.force-landscape) .chapter h1,
+  html:not(.force-landscape) .chapter h2 {
     top: calc(var(--nav) + env(safe-area-inset-top) + 2rem);
   }
 
-  .chapter .lede,
-  .chapter .body,
-  .chapter .text-link {
+  html:not(.force-landscape) .chapter .lede,
+  html:not(.force-landscape) .chapter .body,
+  html:not(.force-landscape) .chapter .text-link {
     top: calc(50% + min(40vw, 35%) + 0.85rem);
   }
 
-  .chapter .scroll-cue {
+  html:not(.force-landscape) .chapter .scroll-cue {
     top: calc(50% + min(40vw, 35%) + 5.5rem);
     max-width: 16rem;
     letter-spacing: 0.14em;
     line-height: 1.45;
   }
 
-  .story-sticky h1 {
+  html:not(.force-landscape) .story-sticky h1 {
     font-size: clamp(2.3rem, 11vw, 3.1rem);
   }
 
-  .story-sticky h2 {
+  html:not(.force-landscape) .story-sticky h2 {
     font-size: clamp(1.85rem, 7.6vw, 2.45rem);
   }
 }
 
 @media (max-width: 899px) and (orientation: portrait) and (max-height: 740px) {
-  .chapter .kicker {
+  html:not(.force-landscape) .chapter .kicker {
     top: calc(var(--nav) + env(safe-area-inset-top) + 0.4rem);
   }
 
-  .chapter h1,
-  .chapter h2 {
+  html:not(.force-landscape) .chapter h1,
+  html:not(.force-landscape) .chapter h2 {
     top: calc(var(--nav) + env(safe-area-inset-top) + 1.65rem);
   }
 
-  .story-sticky h1 {
+  html:not(.force-landscape) .story-sticky h1 {
     font-size: 1.8rem;
   }
 
-  .story-sticky h2 {
+  html:not(.force-landscape) .story-sticky h2 {
     font-size: 1.32rem;
   }
 
-  .chapter .lede,
-  .chapter .body {
+  html:not(.force-landscape) .chapter .lede,
+  html:not(.force-landscape) .chapter .body {
     font-size: 0.95rem;
     line-height: 1.35;
   }
 }
 
 @media (min-width: 700px) and (max-width: 899px) and (orientation: portrait) {
-  .chapter .kicker {
+  html:not(.force-landscape) .chapter .kicker {
     top: calc(var(--nav) + env(safe-area-inset-top) + 0.45rem);
   }
 
-  .chapter h1,
-  .chapter h2 {
+  html:not(.force-landscape) .chapter h1,
+  html:not(.force-landscape) .chapter h2 {
     top: calc(var(--nav) + env(safe-area-inset-top) + 1.75rem);
   }
 
-  .story-sticky h1 {
+  html:not(.force-landscape) .story-sticky h1 {
     font-size: 2.3rem;
   }
 
-  .story-sticky h2 {
+  html:not(.force-landscape) .story-sticky h2 {
     font-size: 1.55rem;
+  }
+}
+
+@media (max-width: 899px) {
+  html.force-landscape .story-sticky {
+    align-items: end;
+    padding-top: calc(var(--nav) + 0.35rem);
+    padding-bottom: 1rem;
+  }
+
+  html.force-landscape .story-sticky h1 {
+    font-size: 2.15rem;
+    max-width: 14ch;
+  }
+
+  html.force-landscape .story-sticky h2 {
+    font-size: 1.7rem;
+  }
+
+  html.force-landscape .lede,
+  html.force-landscape .body {
+    margin-top: 0.45rem;
+    font-size: 0.95rem;
+  }
+
+  html.force-landscape .scroll-cue {
+    margin-top: 0.7rem;
   }
 }
 

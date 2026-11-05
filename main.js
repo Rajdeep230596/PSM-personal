@@ -8,6 +8,7 @@ const story = document.getElementById("story");
 const vendors = document.getElementById("vendors");
 const contact = document.getElementById("contact");
 const tabletForm = document.getElementById("contact-form");
+const connectCta = document.getElementById("connect-cta");
 const chapters = [...document.querySelectorAll(".chapter")];
 const progressBar = document.getElementById("progress-bar");
 const nav = document.getElementById("nav");
@@ -29,7 +30,18 @@ function viewHeight() {
   return scroller.clientHeight;
 }
 
+function contentTop(element) {
+  let top = 0;
+  let node = element;
+  while (node && node !== scroller) {
+    top += node.offsetTop;
+    node = node.offsetParent;
+  }
+  return top;
+}
+
 function viewTop(element) {
+  if (landscapeTurned()) return contentTop(element) - scroller.scrollTop;
   return element.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
 }
 
@@ -47,6 +59,41 @@ function filmProgress() {
 
 function frameScale(boxW, boxH, imageW, imageH) {
   return Math.max(boxW / imageW, boxH / imageH);
+}
+
+let forceLandscape = false;
+
+function viewportSize() {
+  const viewport = window.visualViewport;
+  return {
+    width: Math.round(viewport ? viewport.width : window.innerWidth),
+    height: Math.round(viewport ? viewport.height : window.innerHeight),
+  };
+}
+
+function landscapeTurned() {
+  const view = viewportSize();
+  return forceLandscape && view.height > view.width;
+}
+
+function layoutBox(element) {
+  if (!landscapeTurned()) return element.getBoundingClientRect();
+  let left = 0;
+  let top = 0;
+  let node = element;
+  while (node && node !== screen) {
+    left += node.offsetLeft;
+    top += node.offsetTop;
+    node = node.offsetParent;
+  }
+  return {
+    left,
+    top,
+    width: element.offsetWidth,
+    height: element.offsetHeight,
+    right: left + element.offsetWidth,
+    bottom: top + element.offsetHeight,
+  };
 }
 
 function squeezePortrait() {
@@ -71,7 +118,7 @@ function pictureFit(rect) {
   };
 }
 
-let formClosed = false;
+let formOpen = false;
 
 function contactOnStage() {
   const top = viewTop(contact);
@@ -81,10 +128,15 @@ function contactOnStage() {
 
 function placeTabletForm() {
   const onStage = contactOnStage();
-  if (!onStage) formClosed = false;
-  const typing = tabletForm.contains(document.activeElement);
-  const live = (onStage || typing) && !formClosed;
+  const typing = formOpen && tabletForm.contains(document.activeElement);
+  if (!onStage && !typing) formOpen = false;
+  const live = formOpen && (onStage || typing);
+  const offer = onStage && !live;
   tabletForm.classList.toggle("is-live", live);
+  tabletForm.setAttribute("aria-hidden", live ? "false" : "true");
+  connectCta.classList.toggle("is-live", offer);
+  connectCta.setAttribute("aria-hidden", offer ? "false" : "true");
+  connectCta.setAttribute("aria-expanded", live ? "true" : "false");
   if (!live && tabletForm.contains(document.activeElement)) document.activeElement.blur();
 }
 
@@ -113,12 +165,14 @@ const webKitFilm = (() => {
   const safari = /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|Android/.test(ua);
   return iOS || safari;
 })();
-const frameUrl = "assets/frames.bin?v=5";
+const frameUrl = "assets/frames.bin?v=7";
 const frameCache = new Map();
 const frameCacheMax = webKitFilm ? 14 : 40;
 const frameDecodeAhead = webKitFilm ? 10 : 20;
 const frameDecodeSlots = webKitFilm ? 2 : 4;
-const frameFetchMax = webKitFilm ? 2 : 3;
+const frameFetchMax = 2;
+const frameBatchLimit = 6;
+const frameBatchBytes = 480000;
 const frameFailed = new Set();
 const frameBytes = new Map();
 const frameAbort = new Map();
@@ -449,29 +503,75 @@ function adoptHeader(buf) {
   return true;
 }
 
-function wantedFrames() {
-  const index = filmIndex();
-  const list = [];
-  const seen = new Set();
-  const push = (n) => {
-    if (n < 0 || n >= frameCount || seen.has(n)) return;
-    seen.add(n);
-    list.push(n);
-  };
-  push(index);
-  for (let step = 1; step <= frameDecodeAhead; step += 1) push(index + step);
-  push(index - 1);
-  return list;
+function needsFrame(index) {
+  return index >= 0 && index < frameCount && !frameBytes.has(index) && !frameCache.has(index) && !frameFailed.has(index);
+}
+
+function batchCovers(index) {
+  for (const entry of frameAbort.values()) {
+    if (index >= entry.start && index <= entry.end) return true;
+  }
+  return false;
+}
+
+function planBatch(index) {
+  const targets = [index, index - 1];
+  for (let step = 1; step <= frameDecodeAhead; step += 1) targets.push(index + step);
+  for (let i = 0; i < targets.length; i += 1) {
+    const start = targets[i];
+    if (!needsFrame(start) || batchCovers(start)) continue;
+    if (start <= index) return { start, end: start };
+    let end = start;
+    let bytes = frameOffsets[end + 1] - frameOffsets[end];
+    while (end - start + 1 < frameBatchLimit && end < index + frameDecodeAhead) {
+      const next = end + 1;
+      if (!needsFrame(next) || batchCovers(next)) break;
+      const size = frameOffsets[next + 1] - frameOffsets[next];
+      if (bytes + size > frameBatchBytes) break;
+      bytes += size;
+      end = next;
+    }
+    return { start, end };
+  }
+  return null;
+}
+
+function storeBatch(buf, start, end) {
+  const origin = frameOffsets[start];
+  const expect = frameOffsets[end + 1] - origin;
+  if (buf.length < expect) throw new Error("short");
+  for (let index = start; index <= end; index += 1) {
+    const from = frameOffsets[index] - origin;
+    const to = frameOffsets[index + 1] - origin;
+    const slice = buf.slice(from, to);
+    if (slice.length < 2 || slice[0] !== 0xff || slice[1] !== 0xd8) throw new Error("jpeg");
+    frameBytes.set(index, slice);
+  }
+}
+
+function rangeStart(response) {
+  const header = response.headers.get("Content-Range") || "";
+  const match = /^bytes (\d+)-/i.exec(header);
+  return match ? Number(match[1]) : -1;
 }
 
 async function fetchRange(start, end, signal) {
-  const response = await fetch(frameUrl, { headers: { Range: `bytes=${start}-${end}` }, signal });
-  if (!response.ok) throw new Error(String(response.status));
-  if (response.status !== 206) {
-    if (response.body) response.body.cancel();
-    return null;
+  const response = await fetch(frameUrl, {
+    cache: "no-store",
+    headers: { Range: `bytes=${start}-${end}` },
+    signal,
+  });
+  if (response.status === 206) {
+    const reported = rangeStart(response);
+    if (reported >= 0 && reported !== start) {
+      if (response.body) response.body.cancel();
+      throw new Error("range");
+    }
+    return { buf: new Uint8Array(await response.arrayBuffer()) };
   }
-  return new Uint8Array(await response.arrayBuffer());
+  if (response.status === 200 && !frameParsed) return { full: response };
+  if (response.body) response.body.cancel();
+  throw new Error(String(response.status));
 }
 
 async function consumeFrameResponse(response) {
@@ -500,79 +600,106 @@ async function consumeFrameResponse(response) {
   requestFilm();
 }
 
+async function beginFullStream(response) {
+  if (frameStream) {
+    if (response && response.body) response.body.cancel();
+    return;
+  }
+  frameStream = true;
+  frameAbort.forEach((entry) => {
+    entry.dropped = true;
+    entry.controller.abort();
+  });
+  await consumeFrameResponse(response);
+}
+
 async function readFullStream() {
   if (frameStream) return;
-  frameStream = true;
-  const response = await fetch(frameUrl);
-  await consumeFrameResponse(response);
+  const response = await fetch(frameUrl, { cache: "no-store" });
+  await beginFullStream(response);
 }
 
 function scheduleFrames() {
   if (!frameParsed || frameStream) return;
-  const want = wantedFrames();
-  const wanted = new Set(want);
-  frameAbort.forEach((controller, index) => {
-    if (wanted.has(index)) return;
-    controller.abort();
+  const index = filmIndex();
+  frameAbort.forEach((entry) => {
+    if (entry.end >= index - 1 && entry.start <= index + frameDecodeAhead) return;
+    entry.dropped = true;
+    entry.controller.abort();
   });
-  frameBytes.forEach((bytes, index) => {
-    if (wanted.has(index) || framePending.has(index)) return;
-    frameBytes.delete(index);
+  frameBytes.forEach((bytes, frame) => {
+    if (Math.abs(frame - index) <= frameDecodeAhead + 2 || framePending.has(frame)) return;
+    frameBytes.delete(frame);
   });
-  for (let i = 0; i < want.length; i += 1) {
-    if (frameFetchSlots >= frameFetchMax) return;
-    const index = want[i];
-    if (frameBytes.has(index) || frameCache.has(index) || frameAbort.has(index) || frameFailed.has(index)) continue;
-    const controller = new AbortController();
-    frameAbort.set(index, controller);
+  while (frameFetchSlots < frameFetchMax) {
+    const batch = planBatch(index);
+    if (!batch) return;
+    const key = `${batch.start}:${batch.end}`;
+    const entry = {
+      controller: new AbortController(),
+      start: batch.start,
+      end: batch.end,
+      dropped: false,
+      timedOut: false,
+    };
+    frameAbort.set(key, entry);
     frameFetchSlots += 1;
-    const start = frameOffsets[index];
-    const end = frameOffsets[index + 1] - 1;
-    fetchRange(start, end, controller.signal)
-      .then((buf) => {
-        if (controller.signal.aborted) return;
-        if (!buf) {
-          readFullStream();
+    const timer = setTimeout(() => {
+      entry.timedOut = true;
+      entry.controller.abort();
+    }, 10000);
+    fetchRange(frameOffsets[batch.start], frameOffsets[batch.end + 1] - 1, entry.controller.signal)
+      .then((result) => {
+        if (entry.dropped || entry.controller.signal.aborted) return;
+        if (result.full) {
+          beginFullStream(result.full);
           return;
         }
-        const expect = end - start + 1;
-        if (buf.length < expect) throw new Error("short");
-        frameBytes.set(index, buf.slice(0, expect));
+        storeBatch(result.buf, batch.start, batch.end);
+        frameTries.delete(batch.start);
         requestFilm();
       })
       .catch((err) => {
-        if (err && err.name === "AbortError") return;
-        const tries = (frameTries.get(index) || 0) + 1;
-        frameTries.set(index, tries);
-        if (tries >= 2 && !frameStream) frameFailed.add(index);
+        if (entry.dropped) return;
+        if (err && err.name === "AbortError" && !entry.timedOut) return;
+        const tries = (frameTries.get(batch.start) || 0) + 1;
+        frameTries.set(batch.start, tries);
+        if (tries >= 5) frameFailed.add(batch.start);
       })
       .finally(() => {
-        frameAbort.delete(index);
+        clearTimeout(timer);
+        frameAbort.delete(key);
         frameFetchSlots -= 1;
-        scheduleFrames();
+        if (!frameStream) scheduleFrames();
       });
   }
 }
 
 async function loadFrames() {
   try {
-    let head = await fetchRange(0, 16383);
-    if (!head) {
-      await readFullStream();
+    let result = await fetchRange(0, 16383);
+    if (result.full) {
+      await beginFullStream(result.full);
       return;
     }
-    const needed = headerLength(head);
-    if (needed > head.length) {
-      head = await fetchRange(0, needed - 1);
-      if (!head) {
-        await readFullStream();
+    let buf = result.buf;
+    const needed = headerLength(buf);
+    if (needed > buf.length) {
+      result = await fetchRange(0, needed - 1);
+      if (result.full) {
+        await beginFullStream(result.full);
         return;
       }
+      buf = result.buf;
     }
-    if (!adoptHeader(head)) return;
+    if (!adoptHeader(buf)) return;
     scheduleFrames();
   } catch (err) {
-    paintCue();
+    try {
+      await readFullStream();
+    } catch (again) {
+      paintCue();
+    }
   }
 }
 
@@ -580,7 +707,7 @@ function onScroll() {
   const progress = storyProgress();
   progressBar.style.width = `${filmProgress() * 100}%`;
   if (!reduceMotion) paintChapters(progress);
-  nav.classList.toggle("is-solid", story.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top < viewHeight() * 0.9);
+  nav.classList.toggle("is-solid", viewTop(story) + story.offsetHeight < viewHeight() * 0.9);
   if (!reduceMotion) requestFilm();
   if (viewTop(contact) < viewHeight() * 1.2) placeTabletForm();
 }
@@ -594,7 +721,7 @@ function placeWhatsApp() {
   wa.style.width = "";
   wa.style.height = "";
 
-  const rect = film.getBoundingClientRect();
+  const rect = layoutBox(film);
   const fit = pictureFit(rect);
   const { scaleX, scaleY, originX, originY } = fit;
   const sx = pictureWidth / 1920;
@@ -605,7 +732,9 @@ function placeWhatsApp() {
   const markH = 126 * sy;
   const centerX = originX + (markX + markW / 2) * scaleX;
   const centerY = originY + (markY + markH / 2) * scaleY;
-  const bounds = screen.getBoundingClientRect();
+  const bounds = landscapeTurned()
+    ? { left: 0, top: 0, right: screen.offsetWidth, bottom: screen.offsetHeight }
+    : screen.getBoundingClientRect();
   const margin = 12;
   if (
     centerX < bounds.left + margin ||
@@ -624,14 +753,34 @@ function placeWhatsApp() {
 }
 
 const filmCue = document.querySelector(".scroll-cue");
-const tiltCue = window.matchMedia("(max-width: 899px) and (orientation: portrait), (max-width: 860px)");
+const tiltCue = window.matchMedia("(max-width: 899px) and (orientation: portrait)");
 
 function paintCue() {
-  filmCue.textContent = tiltCue.matches ? "Tilt the device for a better experience" : "Scroll to unfold";
+  const offer = tiltCue.matches && !landscapeTurned();
+  filmCue.textContent = offer ? "Tilt the device for a better experience" : "Scroll to unfold";
+  filmCue.classList.toggle("is-cta", offer);
+  if (offer) filmCue.setAttribute("aria-pressed", "false");
+  else filmCue.removeAttribute("aria-pressed");
 }
 
 paintCue();
 tiltCue.addEventListener("change", paintCue);
+filmCue.addEventListener("click", async () => {
+  if (!filmCue.classList.contains("is-cta")) return;
+  const orientation = screen.orientation;
+  if (orientation && typeof orientation.lock === "function") {
+    try {
+      await orientation.lock("landscape");
+      return;
+    } catch (err) {
+      /* Phones that refuse an orientation lock use the landscape layout below. */
+    }
+  }
+  forceLandscape = true;
+  document.documentElement.classList.add("force-landscape");
+  fitStage();
+  paintCue();
+});
 loadFrames();
 if (reduceMotion) {
   const started = performance.now();
@@ -645,21 +794,31 @@ if (reduceMotion) {
   requestAnimationFrame(tick);
 }
 function fitScreen() {
-  const viewport = window.visualViewport;
-  const fullW = Math.round(viewport ? viewport.width : window.innerWidth);
-  const fullH = Math.round(viewport ? viewport.height : window.innerHeight);
+  const view = viewportSize();
+  const turned = forceLandscape && view.height > view.width;
+  const fullW = turned ? view.height : view.width;
+  const fullH = turned ? view.width : view.height;
   document.documentElement.style.setProperty("--screen-w", `${fullW}px`);
   document.documentElement.style.setProperty("--screen-h", `${fullH}px`);
   stageW = fullW;
   stageH = fullH;
-  screen.style.top = "0";
-  screen.style.left = "0";
-  screen.style.right = "0";
-  screen.style.bottom = "0";
+  screen.style.margin = "0";
   screen.style.width = `${fullW}px`;
   screen.style.height = `${fullH}px`;
-  screen.style.margin = "0";
-  screen.style.transform = "none";
+  if (turned) {
+    screen.style.top = "0";
+    screen.style.left = `${view.width}px`;
+    screen.style.right = "auto";
+    screen.style.bottom = "auto";
+    screen.style.transformOrigin = "top left";
+    screen.style.transform = "rotate(90deg)";
+  } else {
+    screen.style.top = "0";
+    screen.style.left = "0";
+    screen.style.right = "0";
+    screen.style.bottom = "0";
+    screen.style.transform = "none";
+  }
   const changed = fullW !== fitScreen.width || fullH !== fitScreen.height;
   fitScreen.width = fullW;
   fitScreen.height = fullH;
@@ -667,6 +826,13 @@ function fitScreen() {
 }
 
 function measureFilmBox() {
+  const layoutW = film.offsetWidth;
+  const layoutH = film.offsetHeight;
+  if (layoutW > 0 && layoutH > 0) {
+    filmCssW = layoutW;
+    filmCssH = layoutH;
+    return;
+  }
   const rect = film.getBoundingClientRect();
   if (rect.width > 0 && rect.height > 0) {
     filmCssW = rect.width;
@@ -808,9 +974,16 @@ form.addEventListener("submit", (event) => {
   if (!opened) window.location.href = url;
   status.textContent = "WhatsApp is opening.";
 });
-form.querySelector(".ipad-close").addEventListener("click", () => {
-  formClosed = true;
+connectCta.addEventListener("click", () => {
+  formOpen = true;
   placeTabletForm();
+  const name = form.querySelector("[name=name]");
+  if (name) name.focus();
+});
+form.querySelector(".ipad-close").addEventListener("click", () => {
+  formOpen = false;
+  placeTabletForm();
+  if (connectCta.classList.contains("is-live")) connectCta.focus();
 });
 
 function markPops(elements) {

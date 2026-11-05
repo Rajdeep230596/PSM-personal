@@ -30,10 +30,15 @@
   FileETag None
   <IfModule mod_headers.c>
     Header always unset ETag
+    Header unset Last-Modified
     Header always unset Last-Modified
     Header always unset Content-Encoding
+    Header always set Accept-Ranges "bytes"
     Header always set Cache-Control "public, max-age=2592000"
     Header always set Content-Type "application/octet-stream"
+    RequestHeader unset If-Range
+    RequestHeader unset If-Modified-Since
+    RequestHeader unset If-None-Match
   </IfModule>
   SetEnv no-gzip 1
   SetEnv dont-vary 1

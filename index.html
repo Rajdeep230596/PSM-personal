@@ -19,8 +19,8 @@
     <meta name="theme-color" content="#090a0c" />
     <link rel="preload" href="assets/fonts/cormorant-500.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="assets/poster.jpg?v=5" as="image" />
-    <link rel="stylesheet" href="styles.css?v=17" />
+    <link rel="preload" href="assets/poster.jpg?v=6" as="image" />
+    <link rel="stylesheet" href="styles.css?v=21" />
   </head>
   <body>
     <div class="screen" id="screen">
@@ -72,7 +72,7 @@
               <span>PSM Infinity</span>
               Your world. Personally curated.
             </p>
-            <p class="scroll-cue">Scroll to unfold</p>
+            <button class="scroll-cue" type="button">Scroll to unfold</button>
           </article>
 
           <article class="chapter" data-from="0.24" data-to="0.5">
@@ -254,7 +254,9 @@
     </main>
     </div>
 
-    <form class="ipad" id="contact-form" aria-labelledby="ipad-title">
+    <button class="connect-cta" id="connect-cta" type="button" aria-controls="contact-form" aria-expanded="false" aria-hidden="true">Click to connect</button>
+
+    <form class="ipad" id="contact-form" aria-labelledby="ipad-title" aria-hidden="true">
       <div class="ipad-device">
         <div class="ipad-screen">
           <button class="ipad-close" type="button" aria-label="Close">Close</button>
@@ -304,6 +306,6 @@
     </div>
 
     <audio id="music" src="assets/coat.mp3?v=2" loop preload="none"></audio>
-    <script src="main.js?v=46" defer></script>
+    <script src="main.js?v=53" defer></script>
   </body>
 </html>
