@@ -45,16 +45,29 @@ function viewTop(element) {
   return element.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
 }
 
+let storyAnchor = 0;
+let storySpan = 1;
+let storyHeight = 1;
+let contactAnchor = 1;
+let vendorsAnchor = 1;
+
+function measureAnchors() {
+  storyAnchor = contentTop(story);
+  storyHeight = story.offsetHeight;
+  const span = storyHeight - viewHeight();
+  storySpan = span > 0 ? span : 1;
+  const contactTop = contentTop(contact);
+  contactAnchor = contactTop > 0 ? contactTop : 1;
+  vendorsAnchor = contentTop(vendors);
+}
+
 function storyProgress() {
-  const total = story.offsetHeight - viewHeight();
-  if (total <= 0) return 0;
-  return clamp(-viewTop(story) / total, 0, 1);
+  return clamp((scroller.scrollTop - storyAnchor) / storySpan, 0, 1);
 }
 
 function filmProgress() {
-  const contactTop = viewTop(contact) + scroller.scrollTop;
-  if (contactTop <= 0) return 1;
-  return clamp(scroller.scrollTop / contactTop, 0, 1);
+  if (contactAnchor <= 0) return 1;
+  return clamp(scroller.scrollTop / contactAnchor, 0, 1);
 }
 
 function frameScale(boxW, boxH, imageW, imageH) {
@@ -121,8 +134,8 @@ function pictureFit(rect) {
 let formOpen = false;
 
 function contactOnStage() {
-  const top = viewTop(contact);
-  const next = viewTop(vendors);
+  const top = contactAnchor - scroller.scrollTop;
+  const next = vendorsAnchor - scroller.scrollTop;
   return top <= 48 && next > viewHeight() * 0.55;
 }
 
@@ -148,12 +161,16 @@ function paintChapters(progress) {
     const enter = from <= 0 ? 1 : clamp((progress - from) / fade, 0, 1);
     const exit = to >= 1 ? 1 : clamp((to - progress) / fade, 0, 1);
     const opacity = Math.min(enter, exit);
-    chapter.style.opacity = String(opacity);
-    chapter.style.transform = "none";
-    chapter.classList.toggle("is-on", opacity > 0.45);
-    if (opacity > 0.45) {
-      showPops(chapter, true);
-    } else if (opacity < 0.08) {
+    const next = opacity.toFixed(3);
+    if (chapter.dataset.fade !== next) {
+      chapter.dataset.fade = next;
+      chapter.style.opacity = next;
+    }
+    const shown = opacity > 0.45;
+    if (chapter.classList.contains("is-on") !== shown) chapter.classList.toggle("is-on", shown);
+    if (shown) {
+      if (chapter.querySelector(".pop:not(.is-in)")) showPops(chapter, true);
+    } else if (opacity < 0.08 && chapter.querySelector(".pop.is-in")) {
       showPops(chapter, false);
     }
   });
@@ -287,7 +304,7 @@ function drawFrame(index, bitmap) {
     film.height = h;
   }
   filmCtx.imageSmoothingEnabled = true;
-  filmCtx.imageSmoothingQuality = frameSharp ? "high" : "medium";
+  filmCtx.imageSmoothingQuality = frameSharp ? "high" : "low";
   filmCtx.globalAlpha = 1;
   if (squeezePortrait()) {
     drawWash(bitmap);
@@ -335,6 +352,7 @@ function nextToDecode(index) {
     if (!ready(frame)) return;
     if (best < 0 || Math.abs(frame - index) < Math.abs(best - index)) best = frame;
   });
+  if (!frameSharp && best >= 0 && frameShown >= 0 && Math.abs(best - index) >= Math.abs(frameShown - index)) return -1;
   return best;
 }
 
@@ -448,8 +466,8 @@ function paintFrame() {
 }
 
 function requestFilm() {
-  scheduleFrames();
   if (webKitFilm) {
+    scheduleFrames();
     paintFrame();
     return;
   }
@@ -457,6 +475,7 @@ function requestFilm() {
   paintQueued = true;
   requestAnimationFrame(() => {
     paintQueued = false;
+    scheduleFrames();
     paintFrame();
   });
 }
@@ -754,13 +773,29 @@ async function loadFrames() {
   }
 }
 
-function onScroll() {
+let scrollTick = 0;
+
+function flushScroll() {
+  const top = scroller.scrollTop;
+  const viewH = viewHeight();
   const progress = storyProgress();
   progressBar.style.width = `${filmProgress() * 100}%`;
   if (!reduceMotion) paintChapters(progress);
-  nav.classList.toggle("is-solid", viewTop(story) + story.offsetHeight < viewHeight() * 0.9);
+  nav.classList.toggle("is-solid", storyAnchor - top + storyHeight < viewH * 0.9);
   if (!reduceMotion) requestFilm();
-  if (viewTop(contact) < viewHeight() * 1.2) placeTabletForm();
+  if (contactAnchor - top < viewH * 1.2) placeTabletForm();
+}
+
+function onScroll() {
+  if (webKitFilm) {
+    flushScroll();
+    return;
+  }
+  if (scrollTick) return;
+  scrollTick = requestAnimationFrame(() => {
+    scrollTick = 0;
+    flushScroll();
+  });
 }
 
 function placeWhatsApp() {
@@ -917,6 +952,7 @@ function measureFilmBox() {
 
 function fitStage() {
   fitScreen();
+  measureAnchors();
   measureFilmBox();
   frameShownKey = "";
   if (frameParsed) {
@@ -928,6 +964,13 @@ function fitStage() {
 }
 
 fitScreen();
+measureAnchors();
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => {
+    measureAnchors();
+    flushScroll();
+  });
+}
 document.getElementById("year").textContent = String(new Date().getFullYear());
 if (!reduceMotion) paintChapters(0);
 scroller.addEventListener("scroll", onScroll, { passive: true });
