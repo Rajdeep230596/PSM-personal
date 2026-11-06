@@ -553,8 +553,8 @@ function planBatch(index) {
     if (start < index) return { start, end: start };
     let end = start;
     let bytes = frameOffsets[end + 1] - frameOffsets[end];
-    const limit = frameSharp ? frameBatchLimit : 3;
-    const budget = frameSharp ? frameBatchBytes : 260000;
+    const limit = frameSharp ? frameBatchLimit : (webKitFilm ? 4 : 8);
+    const budget = frameSharp ? frameBatchBytes : (webKitFilm ? 360000 : 900000);
     while (end - start + 1 < limit && end < index + frameDecodeAhead) {
       const next = end + 1;
       if (!needsFrame(next) || batchCovers(next)) break;
