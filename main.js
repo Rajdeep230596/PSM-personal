@@ -167,12 +167,12 @@ const webKitFilm = (() => {
 })();
 const frameUrl = "assets/frames.bin?v=7";
 const frameCache = new Map();
-const frameCacheMax = webKitFilm ? 14 : 40;
-const frameDecodeAhead = webKitFilm ? 10 : 20;
-const frameDecodeSlots = webKitFilm ? 2 : 4;
+const frameCacheMax = webKitFilm ? 18 : 48;
+const frameDecodeAhead = webKitFilm ? 16 : 36;
+const frameDecodeSlots = webKitFilm ? 2 : 3;
 const frameFetchMax = 2;
-const frameBatchLimit = 6;
-const frameBatchBytes = 480000;
+const frameBatchLimit = webKitFilm ? 8 : 12;
+const frameBatchBytes = webKitFilm ? 640000 : 1100000;
 const frameFailed = new Set();
 const frameBytes = new Map();
 const frameAbort = new Map();
@@ -242,7 +242,7 @@ function trimFrameCache(index) {
 }
 
 function filmDpr() {
-  return Math.min(window.devicePixelRatio || 1, 2);
+  return Math.min(window.devicePixelRatio || 1, frameSharp ? 2 : 1);
 }
 
 function drawWash(bitmap) {
@@ -300,7 +300,6 @@ function drawFrame(index, bitmap) {
   }
   frameShown = index;
   film.dataset.frame = String(index);
-  armMusic();
 }
 
 function filmIndex() {
@@ -322,18 +321,21 @@ function renderFilm() {
 }
 
 function nextToDecode(index) {
-  for (let step = 0; step <= frameDecodeAhead; step += 1) {
-    const candidate = step === 0 ? index : index + step;
-    if (candidate < 0 || candidate >= frameCount) continue;
-    if (frameCache.has(candidate) || framePending.has(candidate) || frameFailed.has(candidate)) continue;
-    if (!frameReady(candidate)) continue;
-    return candidate;
-  }
-  const behind = index - 1;
-  if (behind >= 0 && !frameCache.has(behind) && !framePending.has(behind) && !frameFailed.has(behind) && frameReady(behind)) {
-    return behind;
-  }
-  return -1;
+  const ready = (candidate) => (
+    candidate >= 0 &&
+    candidate < frameCount &&
+    !frameCache.has(candidate) &&
+    !framePending.has(candidate) &&
+    !frameFailed.has(candidate) &&
+    frameReady(candidate)
+  );
+  if (ready(index)) return index;
+  let best = -1;
+  frameBytes.forEach((_, frame) => {
+    if (!ready(frame)) return;
+    if (best < 0 || Math.abs(frame - index) < Math.abs(best - index)) best = frame;
+  });
+  return best;
 }
 
 function decodeWithImage(blob) {
@@ -392,9 +394,16 @@ function decodeJpeg(bytes) {
 function pumpFrames() {
   if (!frameParsed) return;
   const index = filmIndex();
-  while (frameInflight < frameDecodeSlots) {
+  const slots = frameSharp ? frameDecodeSlots : 1;
+  while (frameInflight < slots) {
     const want = nextToDecode(index);
     if (want < 0) break;
+    if (!frameSharp) {
+      frameBytes.forEach((_, frame) => {
+        if (framePending.has(frame) || frame >= Math.min(want, index) - 1) return;
+        frameBytes.delete(frame);
+      });
+    }
     const bytes = frameBytes.get(want);
     if (!bytes) break;
     framePending.add(want);
@@ -403,14 +412,15 @@ function pumpFrames() {
       .then((bitmap) => {
         framePending.delete(want);
         frameInflight -= 1;
-        const drifted = Math.abs(want - filmIndex()) > frameDecodeAhead + 2;
         frameBytes.delete(want);
-        if (drifted && frameCache.size >= frameCacheMax) {
+        const indexNow = filmIndex();
+        const useful = Math.abs(want - indexNow) <= Math.abs(frameShown - indexNow) || Math.abs(want - indexNow) <= frameDecodeAhead + 2;
+        if (!useful) {
           if (bitmap.close) bitmap.close();
           else if ("src" in bitmap) bitmap.src = "";
         } else {
           frameCache.set(want, bitmap);
-          trimFrameCache(filmIndex());
+          trimFrameCache(indexNow);
           renderFilm();
         }
         pumpFrames();
@@ -515,19 +525,22 @@ function batchCovers(index) {
 }
 
 function planBatch(index) {
-  const targets = [index, index - 1];
-  for (let step = 1; step <= frameDecodeAhead; step += 1) targets.push(index + step);
+  const targets = [];
+  for (let step = 0; step <= frameDecodeAhead; step += 1) targets.push(index + step);
+  if (index > 0) targets.push(index - 1);
   for (let i = 0; i < targets.length; i += 1) {
     const start = targets[i];
     if (!needsFrame(start) || batchCovers(start)) continue;
-    if (start <= index) return { start, end: start };
+    if (start < index) return { start, end: start };
     let end = start;
     let bytes = frameOffsets[end + 1] - frameOffsets[end];
-    while (end - start + 1 < frameBatchLimit && end < index + frameDecodeAhead) {
+    const limit = frameSharp ? frameBatchLimit : 3;
+    const budget = frameSharp ? frameBatchBytes : 260000;
+    while (end - start + 1 < limit && end < index + frameDecodeAhead) {
       const next = end + 1;
       if (!needsFrame(next) || batchCovers(next)) break;
       const size = frameOffsets[next + 1] - frameOffsets[next];
-      if (bytes + size > frameBatchBytes) break;
+      if (bytes + size > budget) break;
       bytes += size;
       end = next;
     }
@@ -536,17 +549,63 @@ function planBatch(index) {
   return null;
 }
 
-function storeBatch(buf, start, end) {
-  const origin = frameOffsets[start];
-  const expect = frameOffsets[end + 1] - origin;
-  if (buf.length < expect) throw new Error("short");
-  for (let index = start; index <= end; index += 1) {
-    const from = frameOffsets[index] - origin;
-    const to = frameOffsets[index + 1] - origin;
-    const slice = buf.slice(from, to);
-    if (slice.length < 2 || slice[0] !== 0xff || slice[1] !== 0xd8) throw new Error("jpeg");
-    frameBytes.set(index, slice);
+function sliceChunks(chunks, from, to) {
+  const out = new Uint8Array(to - from);
+  let pos = 0;
+  let offset = 0;
+  for (const chunk of chunks) {
+    const end = offset + chunk.length;
+    if (end > from && offset < to) {
+      const start = Math.max(0, from - offset);
+      const stop = Math.min(chunk.length, to - offset);
+      out.set(chunk.subarray(start, stop), pos);
+      pos += stop - start;
+    }
+    offset = end;
+    if (offset >= to) break;
   }
+  return out;
+}
+
+async function readFrameBatch(start, end, signal) {
+  const startByte = frameOffsets[start];
+  const endByte = frameOffsets[end + 1] - 1;
+  const response = await fetch(frameUrl, {
+    cache: "no-store",
+    headers: { Range: `bytes=${startByte}-${endByte}` },
+    signal,
+  });
+  if (response.status !== 206) {
+    if (response.status === 200 && !frameParsed) return { full: response };
+    if (response.body) response.body.cancel();
+    throw new Error(String(response.status));
+  }
+  const reported = rangeStart(response);
+  if (reported >= 0 && reported !== startByte) {
+    if (response.body) response.body.cancel();
+    throw new Error("range");
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  let next = start;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    let stored = false;
+    while (next <= end && received >= frameOffsets[next + 1] - startByte) {
+      const slice = sliceChunks(chunks, frameOffsets[next] - startByte, frameOffsets[next + 1] - startByte);
+      if (slice.length < 2 || slice[0] !== 0xff || slice[1] !== 0xd8) throw new Error("jpeg");
+      frameBytes.set(next, slice);
+      next += 1;
+      stored = true;
+    }
+    if (stored) requestFilm();
+  }
+  if (next <= end) throw new Error("short");
+  return null;
 }
 
 function rangeStart(response) {
@@ -622,13 +681,10 @@ async function readFullStream() {
 function scheduleFrames() {
   if (!frameParsed || frameStream) return;
   const index = filmIndex();
-  frameAbort.forEach((entry) => {
-    if (entry.end >= index - 1 && entry.start <= index + frameDecodeAhead) return;
-    entry.dropped = true;
-    entry.controller.abort();
-  });
   frameBytes.forEach((bytes, frame) => {
-    if (Math.abs(frame - index) <= frameDecodeAhead + 2 || framePending.has(frame)) return;
+    if (framePending.has(frame)) return;
+    if (frame >= frameShown && frame <= index + frameDecodeAhead + 4) return;
+    if (Math.abs(frame - index) <= frameDecodeAhead + 4) return;
     frameBytes.delete(frame);
   });
   while (frameFetchSlots < frameFetchMax) {
@@ -647,17 +703,12 @@ function scheduleFrames() {
     const timer = setTimeout(() => {
       entry.timedOut = true;
       entry.controller.abort();
-    }, 10000);
-    fetchRange(frameOffsets[batch.start], frameOffsets[batch.end + 1] - 1, entry.controller.signal)
+    }, 12000);
+    readFrameBatch(batch.start, batch.end, entry.controller.signal)
       .then((result) => {
         if (entry.dropped || entry.controller.signal.aborted) return;
-        if (result.full) {
-          beginFullStream(result.full);
-          return;
-        }
-        storeBatch(result.buf, batch.start, batch.end);
-        frameTries.delete(batch.start);
-        requestFilm();
+        if (result && result.full) beginFullStream(result.full);
+        else frameTries.delete(batch.start);
       })
       .catch((err) => {
         if (entry.dropped) return;
@@ -756,31 +807,54 @@ const filmCue = document.querySelector(".scroll-cue");
 const tiltCue = window.matchMedia("(max-width: 899px) and (orientation: portrait)");
 
 function paintCue() {
-  const offer = tiltCue.matches && !landscapeTurned();
-  filmCue.textContent = offer ? "Tilt the device for a better experience" : "Scroll to unfold";
-  filmCue.classList.toggle("is-cta", offer);
-  if (offer) filmCue.setAttribute("aria-pressed", "false");
+  const turned = landscapeTurned();
+  const offer = tiltCue.matches && !turned;
+  filmCue.textContent = turned
+    ? "Back to the original phone"
+    : offer
+      ? "Tilt the device for a better experience"
+      : "Scroll to unfold";
+  filmCue.classList.toggle("is-cta", offer || turned);
+  if (offer || turned) filmCue.setAttribute("aria-pressed", String(turned));
   else filmCue.removeAttribute("aria-pressed");
+}
+
+function useLandscape(on) {
+  const orientation = window.screen.orientation;
+  if (on) {
+    if (orientation && typeof orientation.lock === "function") {
+      orientation.lock("landscape").catch(() => {});
+    }
+    forceLandscape = true;
+    document.documentElement.classList.add("force-landscape");
+  } else {
+    if (orientation && typeof orientation.unlock === "function") {
+      try {
+        orientation.unlock();
+      } catch (err) {}
+    }
+    forceLandscape = false;
+    document.documentElement.classList.remove("force-landscape");
+    stopLandscapeGlide();
+    scroller.scrollTop = 0;
+  }
+  fitStage();
+  paintCue();
+  if (!reduceMotion) onScroll();
 }
 
 paintCue();
 tiltCue.addEventListener("change", paintCue);
-filmCue.addEventListener("click", async () => {
+filmCue.addEventListener("click", () => {
   if (!filmCue.classList.contains("is-cta")) return;
-  const orientation = screen.orientation;
-  if (orientation && typeof orientation.lock === "function") {
-    try {
-      await orientation.lock("landscape");
-      return;
-    } catch (err) {
-      /* Phones that refuse an orientation lock use the landscape layout below. */
-    }
-  }
-  forceLandscape = true;
-  document.documentElement.classList.add("force-landscape");
-  fitStage();
-  paintCue();
+  useLandscape(!landscapeTurned());
 });
+const phoneReturn = document.querySelector(".phone-return");
+if (phoneReturn) {
+  phoneReturn.addEventListener("click", () => {
+    useLandscape(false);
+  });
+}
 loadFrames();
 if (reduceMotion) {
   const started = performance.now();
@@ -819,6 +893,7 @@ function fitScreen() {
     screen.style.bottom = "0";
     screen.style.transform = "none";
   }
+  scroller.style.touchAction = turned ? "none" : "";
   const changed = fullW !== fitScreen.width || fullH !== fitScreen.height;
   fitScreen.width = fullW;
   fitScreen.height = fullH;
@@ -858,6 +933,83 @@ if (!reduceMotion) paintChapters(0);
 scroller.addEventListener("scroll", onScroll, { passive: true });
 onScroll();
 
+let landscapePointer = null;
+let landscapeGlide = 0;
+let landscapeGlideFrame = 0;
+
+function stopLandscapeGlide() {
+  landscapeGlide = 0;
+  if (!landscapeGlideFrame) return;
+  cancelAnimationFrame(landscapeGlideFrame);
+  landscapeGlideFrame = 0;
+}
+
+function startLandscapeGlide(velocity) {
+  stopLandscapeGlide();
+  landscapeGlide = velocity;
+  const step = () => {
+    if (!landscapeTurned() || Math.abs(landscapeGlide) < 0.35) {
+      landscapeGlideFrame = 0;
+      landscapeGlide = 0;
+      return;
+    }
+    scroller.scrollTop += landscapeGlide;
+    landscapeGlide *= 0.94;
+    landscapeGlideFrame = requestAnimationFrame(step);
+  };
+  landscapeGlideFrame = requestAnimationFrame(step);
+}
+
+scroller.addEventListener("pointerdown", (event) => {
+  if (!landscapeTurned() || event.button !== 0) return;
+  if (event.target.closest("input, textarea, select, .ipad-screen")) return;
+  stopLandscapeGlide();
+  landscapePointer = {
+    id: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    dragging: false,
+    axis: "",
+    lastTime: event.timeStamp,
+    velocity: 0,
+  };
+});
+
+scroller.addEventListener("pointermove", (event) => {
+  if (!landscapePointer || event.pointerId !== landscapePointer.id || !landscapeTurned()) return;
+  const dx = event.clientX - landscapePointer.x;
+  const dy = event.clientY - landscapePointer.y;
+  if (!landscapePointer.dragging) {
+    if (Math.hypot(dx, dy) < 8) return;
+    landscapePointer.dragging = true;
+    landscapePointer.axis = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
+    try {
+      scroller.setPointerCapture(event.pointerId);
+    } catch (err) {}
+  }
+  const step = landscapePointer.axis === "x" ? dx : -dy;
+  const dt = Math.max(16, event.timeStamp - landscapePointer.lastTime);
+  landscapePointer.velocity = step / dt * 16.7;
+  landscapePointer.x = event.clientX;
+  landscapePointer.y = event.clientY;
+  landscapePointer.lastTime = event.timeStamp;
+  scroller.scrollTop += step;
+  event.preventDefault();
+});
+
+scroller.addEventListener("pointerup", (event) => {
+  if (!landscapePointer || event.pointerId !== landscapePointer.id) return;
+  const velocity = landscapePointer.dragging ? landscapePointer.velocity : 0;
+  landscapePointer = null;
+  if (Math.abs(velocity) < 0.6) return;
+  startLandscapeGlide(velocity);
+});
+
+scroller.addEventListener("pointercancel", (event) => {
+  if (!landscapePointer || event.pointerId !== landscapePointer.id) return;
+  landscapePointer = null;
+});
+
 window.addEventListener("resize", () => {
   fitStage();
   paintCue();
@@ -887,20 +1039,8 @@ function paintSound() {
   sound.setAttribute("aria-label", playing ? "Mute music" : "Unmute music");
 }
 
-let musicArmed = false;
-
-function armMusic() {
-  if (musicArmed) return;
-  musicArmed = true;
-  startMusic();
-}
-
 function startMusic() {
-  if (muted) return;
-  if (music.preload !== "auto") {
-    music.preload = "auto";
-    music.load();
-  }
+  if (muted || musicPlaying()) return;
   music.muted = false;
   music.volume = 0.5;
   const pending = music.play();
@@ -924,8 +1064,12 @@ sound.addEventListener("click", (event) => {
   startMusic();
 });
 
-setTimeout(armMusic, 5000);
+startMusic();
 music.addEventListener("canplay", startMusic);
+window.addEventListener("pageshow", startMusic);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") startMusic();
+});
 ["pointerdown", "keydown", "touchstart", "wheel"].forEach((type) => {
   window.addEventListener(type, () => {
     if (music.paused && !muted) startMusic();

@@ -304,6 +304,34 @@ textarea {
   color: var(--gold);
 }
 
+.phone-return {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  min-height: 2.75rem;
+  max-width: 8.5rem;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+}
+
+html.force-landscape .phone-return {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.phone-return:hover,
+.phone-return:focus-visible {
+  color: var(--ink);
+  background: var(--gold);
+}
+
 .nav-toggle {
   display: none;
   background: transparent;
