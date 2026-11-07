@@ -44,7 +44,7 @@
   SetEnv dont-vary 1
 </Files>
 
-<Files "backdrop.mp4">
+<FilesMatch "\.mp4$">
   FileETag None
   <IfModule mod_headers.c>
     Header always unset ETag
@@ -55,4 +55,4 @@
   </IfModule>
   SetEnv no-gzip 1
   SetEnv dont-vary 1
-</Files>
+</FilesMatch>
