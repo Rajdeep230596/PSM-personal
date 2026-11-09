@@ -21,7 +21,7 @@
     <link rel="preload" href="assets/fonts/cormorant-italic.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/poster.jpg?v=6" as="image" />
-    <link rel="stylesheet" href="styles.css?v=47" />
+    <link rel="stylesheet" href="styles.css?v=58" />
   </head>
   <body>
     <svg aria-hidden="true" focusable="false" width="0" height="0" style="position: absolute">
@@ -37,6 +37,13 @@
           <feFuncR type="table" tableValues="0 0.056 0.112 0.168 0.24 0.344 0.474 0.625 0.748 0.865 1" />
           <feFuncG type="table" tableValues="0 0.056 0.112 0.168 0.24 0.344 0.474 0.625 0.748 0.865 1" />
           <feFuncB type="table" tableValues="0 0.056 0.112 0.168 0.24 0.344 0.474 0.625 0.748 0.865 1" />
+        </feComponentTransfer>
+      </filter>
+      <filter id="shot3-cabin" color-interpolation-filters="sRGB">
+        <feComponentTransfer>
+          <feFuncR type="table" tableValues="0 0.048 0.095 0.143 0.204 0.302 0.436 0.600 0.732 0.854 1" />
+          <feFuncG type="table" tableValues="0 0.048 0.095 0.143 0.204 0.302 0.436 0.600 0.732 0.854 1" />
+          <feFuncB type="table" tableValues="0 0.048 0.095 0.143 0.204 0.302 0.436 0.600 0.732 0.854 1" />
         </feComponentTransfer>
       </filter>
     </svg>
@@ -73,58 +80,63 @@
     <div class="scroller" id="scroller">
     <a class="skip" href="#shot-2">Skip to story</a>
     <main>
-      <section class="shot shot-play" id="shot-1">
-        <video
-          class="shot-video"
-          src="assets/shot-1.mp4?v=2"
-          poster="assets/shot-1.jpg?v=2"
-          muted
-          playsinline
-          autoplay
-          preload="auto"
-        ></video>
-        <div class="shade"></div>
-        <div class="shot-copy shot-hero">
-          <h1 class="hero-line is-on" data-line="hello">Hi, this is Sunandan Mitra</h1>
-          <p class="hero-line" data-line="welcome">Welcome to PSM Infinity</p>
-        </div>
-        <button class="scroll-cue" type="button">Scroll</button>
-      </section>
-
-      <section class="shot shot-scrub" id="shot-2" style="--span: 2.8">
+      <div class="lead-blank" aria-hidden="true"></div>
+      <section class="shot shot-scrub" id="shot-1" style="--span: 3.91">
         <div class="shot-sticky">
           <video
             class="shot-video"
-            src="assets/shot-2.mp4?v=1"
-            poster="assets/shot-2.jpg"
+            src="assets/shot-1.mp4?v=2"
+            poster="assets/shot-1.jpg?v=2"
             muted
             playsinline
             preload="auto"
           ></video>
           <div class="shade"></div>
-          <div class="shot-copy">
-            <h2 class="scrub-line" data-from="0.08" data-to="0.5">Your world</h2>
-            <h2 class="scrub-line" data-from="0.48" data-to="0.94">Personally curated</h2>
-          </div>
+          <button class="scroll-cue" type="button">Scroll</button>
         </div>
       </section>
 
-      <section class="shot shot-scrub" id="shot-3" style="--span: 4.6">
+      <section class="interlude interlude-fit" aria-label="Introduction">
+        <h1>Hi, this is Sunandan Mitra</h1>
+        <p class="interlude-lead">Welcome to PSM Infinity</p>
+      </section>
+
+      <section class="shot shot-scrub" id="shot-2" style="--span: 3.19">
         <div class="shot-sticky">
           <video
             class="shot-video"
-            src="assets/shot-3.mp4?v=1"
-            poster="assets/shot-3.jpg"
+            src="assets/shot-2.mp4?v=2"
+            poster="assets/shot-2.jpg?v=2"
             muted
             playsinline
-            loop
-            preload="auto"
+            preload="metadata"
           ></video>
-          <div class="shade shade-soft"></div>
-          <p class="shot-copy">
-            <a class="enter-house" href="#offer">ENTER THE HOUSE</a>
-          </p>
-          <div class="offer-panel scrub-line" id="offer" data-from="0.28" data-to="0.52">
+          <div class="shade"></div>
+        </div>
+      </section>
+
+      <section class="interlude interlude-fit" aria-label="The promise">
+        <h2>Your world</h2>
+        <h2>Personally curated</h2>
+      </section>
+
+      <section class="shot shot-scrub" id="shot-3" style="--span: 3.9">
+        <div class="shot-sticky">
+          <video
+            class="shot-video"
+            src="assets/shot-3.mp4?v=4"
+            poster="assets/shot-3.jpg?v=2"
+            muted
+            playsinline
+            preload="metadata"
+          ></video>
+          <div class="shade"></div>
+        </div>
+      </section>
+
+      <section class="interlude interlude-services interlude-fit" aria-label="The house">
+        <a class="enter-house" href="#offer">ENTER THE HOUSE</a>
+        <div class="offer-panel" id="offer">
             <div class="panel-head">
               <p class="kicker">What we offer</p>
               <h2>Services, held quietly.</h2>
@@ -146,7 +158,7 @@
               </li>
             </ol>
           </div>
-          <div class="offer-panel scrub-line" data-from="0.5" data-to="0.74" aria-label="Services, continued">
+          <div class="offer-panel" aria-label="Services, continued">
             <div class="panel-head">
               <p class="kicker">What we offer</p>
               <h2>Services, held quietly.</h2>
@@ -168,7 +180,7 @@
               </li>
             </ol>
           </div>
-          <div class="offer-panel scrub-line" data-from="0.72" data-to="0.98" aria-label="Services, continued">
+          <div class="offer-panel" aria-label="Services, continued">
             <div class="panel-head">
               <p class="kicker">What we offer</p>
               <h2>Services, held quietly.</h2>
@@ -190,21 +202,24 @@
               </li>
             </ol>
           </div>
-        </div>
       </section>
 
-      <section class="shot shot-scrub" id="shot-4" style="--span: 5.2">
+      <section class="shot shot-scrub" id="shot-4" style="--span: 4.49">
         <div class="shot-sticky">
           <video
             class="shot-video"
-            src="assets/shot-4.mp4?v=3"
-            poster="assets/shot-4.jpg?v=3"
+            src="assets/shot-4.mp4?v=7"
+            poster="assets/shot-4.jpg?v=4"
             muted
             playsinline
-            preload="auto"
+            preload="metadata"
           ></video>
-          <div class="shade shade-soft"></div>
-          <section class="about-screen scrub-line" id="about" data-from="0.07" data-to="0.27" aria-label="About Sunandan Mitra">
+          <div class="shade"></div>
+        </div>
+      </section>
+
+      <section class="interlude interlude-about">
+        <section class="about-screen" id="about" aria-label="About Sunandan Mitra">
             <div class="about-copy">
               <p class="kicker">About</p>
               <h2>Sunandan Mitra</h2>
@@ -218,7 +233,7 @@
               </p>
             </div>
           </section>
-          <section class="about-screen scrub-line" id="associations" data-from="0.26" data-to="0.46" aria-label="Past associations">
+          <section class="about-screen" id="associations" aria-label="Past associations">
             <p class="kicker">Past associations</p>
             <ul class="timeline">
               <li>
@@ -231,7 +246,7 @@
               </li>
             </ul>
           </section>
-          <button class="connect-cta scrub-line" id="connect" type="button" data-from="0.72" data-to="1.2">Connect With Us</button>
+          <button class="connect-cta" id="connect" type="button">Connect With Us</button>
           <form class="ipad shot-form" id="contact-form" aria-labelledby="ipad-title">
             <div class="ipad-device">
               <div class="ipad-screen">
@@ -263,7 +278,6 @@
               </div>
             </div>
           </form>
-        </div>
       </section>
 
       <div class="sheet">
@@ -355,6 +369,6 @@
     </div>
 
     <audio id="music" src="assets/coat.mp3?v=2" loop preload="auto" autoplay></audio>
-    <script src="main.js?v=100" defer></script>
+    <script src="main.js?v=107" defer></script>
   </body>
 </html>

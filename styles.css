@@ -1441,9 +1441,24 @@ h2 {
   background: #050607;
 }
 
+.lead-blank {
+  height: clamp(6.5rem, calc(var(--screen-h) * 0.16), 11rem);
+  background: #000;
+}
+
 .shot-play {
   height: var(--screen-h);
   overflow: hidden;
+}
+
+@media (max-width: 899px) and (orientation: portrait) {
+  html:not(.force-landscape) .shot-sticky {
+    background: #000;
+  }
+
+  html:not(.force-landscape) .shot-sticky .shot-video {
+    object-fit: contain;
+  }
 }
 
 .shot-scrub {
@@ -1738,11 +1753,21 @@ h2 {
   pointer-events: none;
 }
 
-#shot-1 .shot-video {
+#shot-1 .shot-video,
+#shot-2 .shot-video,
+#shot-3 .shot-video,
+#shot-4 .shot-video {
   filter: url("#shot1-blacks");
 }
 
-#shot-1 .shade {
+#shot-3.is-cabin .shot-video {
+  filter: url("#shot3-cabin");
+}
+
+#shot-1 .shade,
+#shot-2 .shade,
+#shot-3 .shade,
+#shot-4 .shade {
   background: radial-gradient(
     ellipse 72% 64% at 50% 44%,
     rgba(0, 0, 0, 0) 0%,
@@ -1750,14 +1775,6 @@ h2 {
     rgba(0, 0, 0, 0.28) 64%,
     rgba(0, 0, 0, 0.72) 100%
   );
-}
-
-#shot-4.is-deep .shot-video {
-  filter: url("#deeper-blacks");
-}
-
-#shot-4 .shade {
-  background: linear-gradient(180deg, rgba(8, 8, 10, 0.18), transparent 28%, transparent 72%, rgba(8, 8, 10, 0.22));
 }
 
 .shot-form .ipad-device,
@@ -1824,13 +1841,127 @@ h2 {
   max-height: none;
 }
 
-.shot-play .scroll-cue {
+.shot-sticky .scroll-cue {
   position: absolute;
   z-index: 4;
   left: auto;
   right: max(4vw, env(safe-area-inset-right));
   bottom: max(1.4rem, env(safe-area-inset-bottom));
   text-align: right;
+}
+
+.interlude {
+  position: relative;
+  z-index: 2;
+  min-height: var(--screen-h);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.8rem;
+  padding:
+    calc(var(--nav) + 2.2rem)
+    max(6vw, env(safe-area-inset-right))
+    3rem
+    max(6vw, env(safe-area-inset-left));
+  background: #000;
+  color: var(--champagne);
+}
+
+.interlude > h1,
+.interlude > h2 {
+  margin: 0;
+  max-width: 14ch;
+  font-weight: 500;
+  font-size: clamp(3rem, 6.2vw, 6.4rem);
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  color: var(--champagne);
+}
+
+.interlude-lead {
+  margin: 0.2rem 0 0;
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  color: var(--ivory-dim);
+}
+
+.interlude-services,
+.interlude-about {
+  justify-content: flex-start;
+  gap: 2.4rem;
+}
+
+.interlude-fit {
+  min-height: 0;
+  justify-content: flex-start;
+  padding-top: 2.2rem;
+  padding-bottom: 2.2rem;
+}
+
+.interlude .enter-house {
+  position: static;
+  display: inline-block;
+  width: fit-content;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.interlude .offer-panel,
+.interlude .about-screen,
+.interlude .shot-form {
+  position: relative;
+  inset: auto;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  width: min(46rem, 100%);
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  visibility: visible;
+  opacity: 1;
+  background: none;
+}
+
+.interlude .connect-cta {
+  position: relative;
+  left: auto;
+  top: auto;
+  display: inline-grid;
+  width: fit-content;
+  min-height: 2.85rem;
+  margin-top: 0.4rem;
+  padding: 0.85rem 1.7rem;
+  border-radius: 999px;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  font-size: 0.78rem;
+}
+
+.interlude .shot-form {
+  width: min(28rem, 100%);
+  opacity: 0;
+  visibility: hidden;
+  max-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.interlude .shot-form.is-open {
+  opacity: 1;
+  visibility: visible;
+  max-height: none;
+  overflow: visible;
+  pointer-events: auto;
+}
+
+.interlude .shot-form .ipad-device {
+  width: min(25.5rem, 100%);
+  height: auto;
+  transform: none;
 }
 
 @media (max-width: 800px) {

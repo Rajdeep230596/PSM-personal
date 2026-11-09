@@ -6,12 +6,10 @@ const shot1 = document.getElementById("shot-1");
 const shot2 = document.getElementById("shot-2");
 const shot3 = document.getElementById("shot-3");
 const shot4 = document.getElementById("shot-4");
-const hello = shot1.querySelector('[data-line="hello"]');
-const welcome = shot1.querySelector('[data-line="welcome"]');
 const play1 = shot1.querySelector("video");
+const play2 = shot2.querySelector("video");
 const play3 = shot3.querySelector("video");
-const scrub2 = shot2.querySelector("video");
-const scrub4 = shot4.querySelector("video");
+const play4 = shot4.querySelector("video");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 let forceLandscape = false;
@@ -57,6 +55,7 @@ function fitScreen() {
     screen.style.transform = "none";
   }
   scroller.style.touchAction = turned ? "none" : "";
+  layoutFilms();
 }
 
 function spanOf(section) {
@@ -126,7 +125,7 @@ function shot4Time(progress, duration) {
 }
 
 function placeOnFrame(element, screen, clearTop = 0, minSize = 160) {
-  const box = scrub4.getBoundingClientRect();
+  const box = play4.getBoundingClientRect();
   const sticky = element.parentElement.getBoundingClientRect();
   if (box.width < 2 || box.height < 2) return;
   const scale = Math.max(box.width / 16, box.height / 9);
@@ -150,74 +149,114 @@ function placeOnFrame(element, screen, clearTop = 0, minSize = 160) {
   element.style.transform = "none";
 }
 
-function placeFormOnScreen() {
-  placeOnFrame(document.getElementById("contact-form"), { x: 0.17, y: 0.155, w: 0.66, h: 0.72 });
-}
-
-function placeConnectOnScreen() {
-  placeOnFrame(document.getElementById("connect"), { x: 0.452, y: 0.742, w: 0.292, h: 0.086 }, 0, 36);
-}
-
-function paintIntro() {
-  const duration = play1.duration;
-  const progress = duration ? play1.currentTime / duration : 0;
-  const showWelcome = progress >= 0.42;
-  hello.classList.toggle("is-on", !showWelcome);
-  welcome.classList.toggle("is-on", showWelcome);
-}
-
-function enterHouseScroll() {
-  const progress = sectionProgress(shot3);
-  return progress >= 0.04 && progress < 0.26;
-}
-
-function paintEnterHouse() {
-  const link = document.querySelector(".enter-house");
-  if (!link) return;
-  const show = enterHouseScroll() && shot3OnScreen();
-  link.style.opacity = show ? "1" : "0";
-  link.classList.toggle("is-shown", show);
-  link.classList.toggle("is-live", show);
-}
+const films = [
+  [play1, shot1],
+  [play2, shot2],
+  [play3, shot3],
+  [play4, shot4],
+];
 
 function render() {
   const max = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
   progressBar.style.width = `${(scroller.scrollTop / max) * 100}%`;
-  nav.classList.toggle("is-solid", scroller.scrollTop > shot1.offsetHeight * 0.82);
-
-  const second = sectionProgress(shot2);
-  const third = sectionProgress(shot3);
-  const fourth = sectionProgress(shot4);
-  paintLines(shot2, second);
-  paintLines(shot3, third);
-  paintLines(shot4, fourth);
-  shot4.classList.toggle("is-deep", fourth < 0.47);
-  if (!reduceMotion) {
-    if (scrub2.duration) seekTo(scrub2, second * (scrub2.duration - 0.05));
-    if (scrub4.duration) seekTo(scrub4, shot4Time(fourth, scrub4.duration - 0.05));
-    placeFormOnScreen();
-    placeConnectOnScreen();
-    if (fourth < 0.68) closeForm();
-    keepShot3Playing();
-  }
-  paintEnterHouse();
+  nav.classList.toggle("is-solid", scroller.scrollTop > shot1.offsetTop + scroller.clientHeight * 0.72);
+  if (reduceMotion) return;
+  films.forEach(([video, section]) => scrubFilm(video, section));
+  if (sectionOnScreen(shot3)) shot3.classList.toggle("is-cabin", play3.currentTime >= shot3CabinAt);
 }
 
-function shot3OnScreen() {
-  const top = shot3.offsetTop;
-  const bottom = top + shot3.offsetHeight;
+function sectionOnScreen(section) {
+  const top = section.offsetTop;
+  const bottom = top + section.offsetHeight;
   const viewTop = scroller.scrollTop;
   const viewBottom = viewTop + scroller.clientHeight;
   return bottom > viewTop + 24 && top < viewBottom - 24;
 }
 
-function keepShot3Playing() {
-  if (shot3OnScreen()) {
-    if (play3.paused) play3.play().catch(() => {});
+function scrubTarget(video, section) {
+  const span = Math.max(0, video.duration - 0.04);
+  return clamp(sectionProgress(section) * span, 0, span);
+}
+
+function scrubFilm(video, section) {
+  const view = scroller.clientHeight;
+  const near = section.offsetTop < scroller.scrollTop + view * 1.4 && section.offsetTop + section.offsetHeight > scroller.scrollTop - view;
+  if (near && video.preload !== "auto") video.preload = "auto";
+  const on = sectionOnScreen(section);
+  if (near && !on && video.dataset.warm !== "1" && video.readyState < 2) {
+    video.dataset.warm = "1";
+    video.play().then(() => {
+      if (sectionOnScreen(section)) return;
+      video.pause();
+      video.currentTime = 0;
+    }).catch(() => {});
+  }
+  if (!on) {
+    if (!video.paused) video.pause();
     return;
   }
-  if (!play3.paused) play3.pause();
+  if (section.offsetHeight <= scroller.clientHeight + 8) {
+    if (video.paused) video.play().catch(() => {});
+    return;
+  }
+  if (!Number.isFinite(video.duration) || video.readyState < 1) return;
+  if (!video.paused) video.pause();
+  video.dataset.want = String(scrubTarget(video, section));
+  applyScrub(video);
 }
+
+function applyScrub(video) {
+  if (video.dataset.scrubbing === "1" || video.seeking) return;
+  const want = Number(video.dataset.want);
+  if (!Number.isFinite(want)) return;
+  const safe = holds(video, want) ? want : Math.min(want, Math.max(0, bufferedEnd(video) - 0.08));
+  if (!Number.isFinite(safe) || Math.abs(video.currentTime - safe) < 0.04) return;
+  video.dataset.scrubbing = "1";
+  try {
+    video.currentTime = safe;
+  } catch (err) {
+    video.dataset.scrubbing = "0";
+  }
+}
+
+const shot3CabinAt = 8.9;
+
+function layoutFilms() {
+  const phone = window.matchMedia("(max-width: 899px) and (orientation: portrait)").matches && !landscapeTurned();
+  films.forEach(([, section]) => {
+    section.style.height = "";
+    const next = section.nextElementSibling;
+    if (!next || !next.classList.contains("interlude")) return;
+    next.style.marginTop = "";
+    next.style.minHeight = "";
+  });
+  if (!phone) {
+    films.forEach(([video, section]) => {
+      const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 16;
+      section.style.setProperty("--span", (1 + duration / 5.5).toFixed(2));
+    });
+    return;
+  }
+  const view = scroller.clientHeight;
+  const travel = Math.round(view * 0.72);
+  films.forEach(([, section]) => {
+    section.style.height = `${view + travel}px`;
+  });
+}
+
+films.forEach(([video, section]) => {
+  video.addEventListener("seeked", () => {
+    video.dataset.scrubbing = "0";
+    if (sectionOnScreen(section)) applyScrub(video);
+  });
+  video.addEventListener("progress", () => {
+    if (sectionOnScreen(section)) applyScrub(video);
+  });
+  video.addEventListener("loadedmetadata", () => {
+    layoutFilms();
+    render();
+  });
+});
 
 function onScroll() {
   if (scrollTick) return;
@@ -228,36 +267,9 @@ function onScroll() {
 }
 
 function jumpTo(hash) {
-  if (hash === "#offer") {
-    scroller.scrollTop = shot3.offsetTop + spanOf(shot3) * 0.4;
-    return;
-  }
-  if (hash === "#about") {
-    scroller.scrollTop = shot4.offsetTop + spanOf(shot4) * 0.2;
-    return;
-  }
-  if (hash === "#contact-form" || hash === "#connect") {
-    scroller.scrollTop = shot4.offsetTop + spanOf(shot4) * 0.9;
-    return;
-  }
   const target = document.querySelector(hash);
   if (target) scroller.scrollTop = target.offsetTop;
 }
-
-play1.addEventListener("timeupdate", paintIntro);
-play3.addEventListener("timeupdate", paintEnterHouse);
-play1.addEventListener("loadeddata", () => {
-  paintIntro();
-  play1.play().catch(() => {});
-});
-if (play1.readyState >= 2) play1.play().catch(() => {});
-
-[scrub2, scrub4].forEach((video) => {
-  const hold = () => video.pause();
-  video.addEventListener("loadeddata", hold);
-  video.addEventListener("play", hold);
-  video.addEventListener("seeked", render);
-});
 
 scroller.addEventListener("scroll", onScroll, { passive: true });
 window.addEventListener("resize", () => {
