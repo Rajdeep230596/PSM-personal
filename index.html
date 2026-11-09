@@ -20,8 +20,8 @@
     <link rel="preload" href="assets/fonts/cormorant-500.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/cormorant-italic.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="assets/poster.jpg?v=6" as="image" />
-    <link rel="stylesheet" href="styles.css?v=58" />
+    <link rel="preload" href="assets/frames/shot-1/000.jpg?v=2" as="image" fetchpriority="high" />
+    <link rel="stylesheet" href="styles.css?v=59" />
   </head>
   <body>
     <svg aria-hidden="true" focusable="false" width="0" height="0" style="position: absolute">
@@ -83,14 +83,7 @@
       <div class="lead-blank" aria-hidden="true"></div>
       <section class="shot shot-scrub" id="shot-1" style="--span: 3.91">
         <div class="shot-sticky">
-          <video
-            class="shot-video"
-            src="assets/shot-1.mp4?v=2"
-            poster="assets/shot-1.jpg?v=2"
-            muted
-            playsinline
-            preload="auto"
-          ></video>
+          <img class="shot-video" data-reel="shot-1" src="assets/frames/shot-1/000.jpg?v=2" alt="" fetchpriority="high" />
           <div class="shade"></div>
           <button class="scroll-cue" type="button">Scroll</button>
         </div>
@@ -103,14 +96,7 @@
 
       <section class="shot shot-scrub" id="shot-2" style="--span: 3.19">
         <div class="shot-sticky">
-          <video
-            class="shot-video"
-            src="assets/shot-2.mp4?v=2"
-            poster="assets/shot-2.jpg?v=2"
-            muted
-            playsinline
-            preload="metadata"
-          ></video>
+          <img class="shot-video" data-reel="shot-2" alt="" />
           <div class="shade"></div>
         </div>
       </section>
@@ -122,14 +108,7 @@
 
       <section class="shot shot-scrub" id="shot-3" style="--span: 3.9">
         <div class="shot-sticky">
-          <video
-            class="shot-video"
-            src="assets/shot-3.mp4?v=4"
-            poster="assets/shot-3.jpg?v=2"
-            muted
-            playsinline
-            preload="metadata"
-          ></video>
+          <img class="shot-video" data-reel="shot-3" alt="" />
           <div class="shade"></div>
         </div>
       </section>
@@ -206,14 +185,7 @@
 
       <section class="shot shot-scrub" id="shot-4" style="--span: 4.49">
         <div class="shot-sticky">
-          <video
-            class="shot-video"
-            src="assets/shot-4.mp4?v=7"
-            poster="assets/shot-4.jpg?v=4"
-            muted
-            playsinline
-            preload="metadata"
-          ></video>
+          <img class="shot-video" data-reel="shot-4" alt="" />
           <div class="shade"></div>
         </div>
       </section>
@@ -368,7 +340,7 @@
 
     </div>
 
-    <audio id="music" src="assets/coat.mp3?v=2" loop preload="auto" autoplay></audio>
-    <script src="main.js?v=107" defer></script>
+    <audio id="music" src="assets/coat.mp3?v=2" loop preload="none"></audio>
+    <script src="main.js?v=114" defer></script>
   </body>
 </html>

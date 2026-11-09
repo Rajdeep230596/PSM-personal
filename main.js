@@ -6,10 +6,10 @@ const shot1 = document.getElementById("shot-1");
 const shot2 = document.getElementById("shot-2");
 const shot3 = document.getElementById("shot-3");
 const shot4 = document.getElementById("shot-4");
-const play1 = shot1.querySelector("video");
-const play2 = shot2.querySelector("video");
-const play3 = shot3.querySelector("video");
-const play4 = shot4.querySelector("video");
+const play1 = shot1.querySelector(".shot-video");
+const play2 = shot2.querySelector(".shot-video");
+const play3 = shot3.querySelector(".shot-video");
+const play4 = shot4.querySelector(".shot-video");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 let forceLandscape = false;
@@ -161,8 +161,8 @@ function render() {
   progressBar.style.width = `${(scroller.scrollTop / max) * 100}%`;
   nav.classList.toggle("is-solid", scroller.scrollTop > shot1.offsetTop + scroller.clientHeight * 0.72);
   if (reduceMotion) return;
-  films.forEach(([video, section]) => scrubFilm(video, section));
-  if (sectionOnScreen(shot3)) shot3.classList.toggle("is-cabin", play3.currentTime >= shot3CabinAt);
+  paintFilms();
+  if (sectionOnScreen(shot3)) shot3.classList.toggle("is-cabin", Number(play3.dataset.part || 0) >= shot3CabinAt);
 }
 
 function sectionOnScreen(section) {
@@ -173,47 +173,156 @@ function sectionOnScreen(section) {
   return bottom > viewTop + 24 && top < viewBottom - 24;
 }
 
-function scrubTarget(video, section) {
-  const span = Math.max(0, video.duration - 0.04);
-  return clamp(sectionProgress(section) * span, 0, span);
+const reels = {};
+const reelLength = {
+  "shot-1": 16,
+  "shot-2": 12.07,
+  "shot-3": 15.97,
+  "shot-4": 19.2,
+};
+
+function reelDuration(video) {
+  const reel = reels[video.dataset.reel];
+  if (reel && reel.duration > 0) return reel.duration;
+  return reelLength[video.dataset.reel] || 16;
 }
 
-function scrubFilm(video, section) {
+function partFile(id, index) {
+  return `assets/frames/${id}/${String(index).padStart(3, "0")}.jpg?v=2`;
+}
+
+function frameIndex(reel, progress) {
+  return Math.min(reel.count - 1, Math.max(0, Math.floor(progress * reel.count)));
+}
+
+const frameCache = new Map();
+const frameQueue = [];
+let frameSlots = 0;
+
+function keepOpeningFrame() {
+  const opening = partFile("shot-1", 0);
+  if (play1.getAttribute("src") !== opening) return;
+  play1.dataset.shown = "0";
+  play1.dataset.part = "0";
+  const store = () => {
+    if (play1.naturalWidth) frameCache.set(opening, play1);
+  };
+  if (play1.complete && play1.naturalWidth) {
+    store();
+    return;
+  }
+  frameCache.set(opening, "loading");
+  play1.addEventListener("load", store, { once: true });
+}
+
+keepOpeningFrame();
+
+function enqueueFrame(url) {
+  if (frameCache.has(url) || frameQueue.includes(url)) return;
+  frameQueue.push(url);
+}
+
+function pumpFrames() {
+  while (frameSlots < 3 && frameQueue.length) {
+    const url = frameQueue.shift();
+    if (frameCache.has(url)) continue;
+    frameCache.set(url, "loading");
+    frameSlots += 1;
+    const image = new Image();
+    const settle = (value) => {
+      frameCache.set(url, value);
+      frameSlots -= 1;
+      pumpFrames();
+      render();
+    };
+    image.onload = () => {
+      if (image.decode) {
+        image.decode().then(() => settle(image)).catch(() => settle(image));
+        return;
+      }
+      settle(image);
+    };
+    image.onerror = () => settle("error");
+    image.src = url;
+  }
+}
+
+function queueReel(id, count, center) {
+  frameQueue.length = 0;
+  for (let step = 0; step < count; step += 1) {
+    const ahead = center + step;
+    const behind = center - step;
+    if (ahead >= 0 && ahead < count) enqueueFrame(partFile(id, ahead));
+    if (step && behind >= 0 && behind < count) enqueueFrame(partFile(id, behind));
+  }
+  pumpFrames();
+}
+
+function nearestFrame(id, count, index) {
+  for (let step = 0; step < count; step += 1) {
+    const ahead = index + step;
+    const behind = index - step;
+    if (ahead < count) {
+      const image = frameCache.get(partFile(id, ahead));
+      if (image && image !== "loading" && image !== "error") return { index: ahead, image };
+    }
+    if (step && behind >= 0) {
+      const image = frameCache.get(partFile(id, behind));
+      if (image && image !== "loading" && image !== "error") return { index: behind, image };
+    }
+  }
+  return null;
+}
+
+function holdFilm(picture, section, queue) {
+  const id = picture.dataset.reel;
+  const reel = reels[id];
+  if (!reel || !reel.count) return;
   const view = scroller.clientHeight;
-  const near = section.offsetTop < scroller.scrollTop + view * 1.4 && section.offsetTop + section.offsetHeight > scroller.scrollTop - view;
-  if (near && video.preload !== "auto") video.preload = "auto";
-  const on = sectionOnScreen(section);
-  if (near && !on && video.dataset.warm !== "1" && video.readyState < 2) {
-    video.dataset.warm = "1";
-    video.play().then(() => {
-      if (sectionOnScreen(section)) return;
-      video.pause();
-      video.currentTime = 0;
-    }).catch(() => {});
+  const mid = scroller.scrollTop + view * 0.42;
+  const near = mid > section.offsetTop - view * 0.45 && mid < section.offsetTop + section.offsetHeight + view * 0.2;
+  if (!near) return;
+  const progress = sectionOnScreen(section) ? sectionProgress(section) : mid > section.offsetTop ? 1 : 0;
+  const index = frameIndex(reel, progress);
+  const ready = nearestFrame(id, reel.count, index);
+  if (ready && picture.dataset.shown !== String(ready.index)) {
+    picture.dataset.shown = String(ready.index);
+    picture.dataset.part = String(ready.index / reel.fps);
+    picture.src = ready.image.src;
   }
-  if (!on) {
-    if (!video.paused) video.pause();
-    return;
+  if (queue && picture.dataset.center !== String(index)) {
+    picture.dataset.center = String(index);
+    queueReel(id, reel.count, index);
   }
-  if (section.offsetHeight <= scroller.clientHeight + 8) {
-    if (video.paused) video.play().catch(() => {});
-    return;
-  }
-  if (!Number.isFinite(video.duration) || video.readyState < 1) return;
-  if (!video.paused) video.pause();
-  video.dataset.want = String(scrubTarget(video, section));
-  applyScrub(video);
+}
+
+function paintFilms() {
+  const viewTop = scroller.scrollTop;
+  const viewBottom = viewTop + scroller.clientHeight;
+  let focus = null;
+  let focusOverlap = 0;
+  films.forEach((pair) => {
+    const section = pair[1];
+    const overlap = Math.min(section.offsetTop + section.offsetHeight, viewBottom) - Math.max(section.offsetTop, viewTop);
+    if (overlap > focusOverlap) {
+      focusOverlap = overlap;
+      focus = pair[0];
+    }
+  });
+  films.forEach(([picture, section]) => holdFilm(picture, section, picture === focus));
 }
 
 function applyScrub(video) {
-  if (video.dataset.scrubbing === "1" || video.seeking) return;
   const want = Number(video.dataset.want);
   if (!Number.isFinite(want)) return;
-  const safe = holds(video, want) ? want : Math.min(want, Math.max(0, bufferedEnd(video) - 0.08));
-  if (!Number.isFinite(safe) || Math.abs(video.currentTime - safe) < 0.04) return;
+  const asked = Number(video.dataset.asked);
+  if ((video.dataset.scrubbing === "1" || video.seeking) && Number.isFinite(asked) && Math.abs(want - asked) < 0.45) return;
+  if (Math.abs(video.currentTime - want) < 0.12) return;
   video.dataset.scrubbing = "1";
+  video.dataset.asked = String(want);
+  video.dataset.seekAt = String(performance.now());
   try {
-    video.currentTime = safe;
+    video.currentTime = want;
   } catch (err) {
     video.dataset.scrubbing = "0";
   }
@@ -222,7 +331,6 @@ function applyScrub(video) {
 const shot3CabinAt = 8.9;
 
 function layoutFilms() {
-  const phone = window.matchMedia("(max-width: 899px) and (orientation: portrait)").matches && !landscapeTurned();
   films.forEach(([, section]) => {
     section.style.height = "";
     const next = section.nextElementSibling;
@@ -230,10 +338,10 @@ function layoutFilms() {
     next.style.marginTop = "";
     next.style.minHeight = "";
   });
+  const phone = window.matchMedia("(max-width: 899px) and (orientation: portrait)").matches && !landscapeTurned();
   if (!phone) {
-    films.forEach(([video, section]) => {
-      const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 16;
-      section.style.setProperty("--span", (1 + duration / 5.5).toFixed(2));
+    films.forEach(([picture, section]) => {
+      section.style.setProperty("--span", (1 + reelDuration(picture) / 5.5).toFixed(2));
     });
     return;
   }
@@ -244,19 +352,14 @@ function layoutFilms() {
   });
 }
 
-films.forEach(([video, section]) => {
-  video.addEventListener("seeked", () => {
-    video.dataset.scrubbing = "0";
-    if (sectionOnScreen(section)) applyScrub(video);
-  });
-  video.addEventListener("progress", () => {
-    if (sectionOnScreen(section)) applyScrub(video);
-  });
-  video.addEventListener("loadedmetadata", () => {
+fetch("assets/frames/manifest.json?v=2")
+  .then((response) => response.json())
+  .then((data) => {
+    Object.assign(reels, data);
     layoutFilms();
     render();
-  });
-});
+  })
+  .catch(() => {});
 
 function onScroll() {
   if (scrollTick) return;
@@ -463,12 +566,6 @@ sound.addEventListener("click", (event) => {
   startMusic();
 });
 
-startMusic();
-music.addEventListener("canplay", startMusic);
-window.addEventListener("pageshow", startMusic);
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") startMusic();
-});
 ["pointerdown", "keydown", "touchstart", "wheel"].forEach((type) => {
   window.addEventListener(type, () => {
     if (music.paused && !muted) startMusic();

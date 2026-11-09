@@ -86,6 +86,7 @@ body {
   scroll-behavior: auto;
   overscroll-behavior: none;
   overflow-anchor: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 img {
