@@ -20,8 +20,28 @@
     <link rel="preload" href="assets/fonts/cormorant-500.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/cormorant-italic.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="assets/frames/shot-1/000.jpg?v=2" as="image" fetchpriority="high" />
-    <link rel="stylesheet" href="styles.css?v=59" />
+    <!-- The opening runway starts at parse time, before main.js is even parsed,
+         so the first second of scrolling never waits on the script. Each tier is
+         gated by the same rule pickTier() uses in main.js. -->
+    <link rel="preload" href="assets/frames/1280/shot-1/000.jpg?v=3" as="image" fetchpriority="high" media="(min-width: 900px)" />
+    <link rel="preload" href="assets/frames/1280/shot-1/001.jpg?v=3" as="image" fetchpriority="high" media="(min-width: 900px)" />
+    <link rel="preload" href="assets/frames/1280/shot-1/002.jpg?v=3" as="image" fetchpriority="high" media="(min-width: 900px)" />
+    <link rel="preload" href="assets/frames/1280/shot-1/003.jpg?v=3" as="image" fetchpriority="high" media="(min-width: 900px)" />
+    <link rel="preload" href="assets/frames/1280/shot-1/004.jpg?v=3" as="image" media="(min-width: 900px)" />
+    <link rel="preload" href="assets/frames/1280/shot-1/005.jpg?v=3" as="image" media="(min-width: 900px)" />
+    <link rel="preload" href="assets/frames/1080/shot-1/000.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
+    <link rel="preload" href="assets/frames/1080/shot-1/001.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
+    <link rel="preload" href="assets/frames/1080/shot-1/002.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
+    <link rel="preload" href="assets/frames/1080/shot-1/003.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
+    <link rel="preload" href="assets/frames/1080/shot-1/004.jpg?v=3" as="image" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
+    <link rel="preload" href="assets/frames/1080/shot-1/005.jpg?v=3" as="image" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
+    <link rel="preload" href="assets/frames/720/shot-1/000.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
+    <link rel="preload" href="assets/frames/720/shot-1/001.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
+    <link rel="preload" href="assets/frames/720/shot-1/002.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
+    <link rel="preload" href="assets/frames/720/shot-1/003.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
+    <link rel="preload" href="assets/frames/720/shot-1/004.jpg?v=3" as="image" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
+    <link rel="preload" href="assets/frames/720/shot-1/005.jpg?v=3" as="image" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
+    <link rel="stylesheet" href="styles.css?v=60" />
   </head>
   <body>
     <svg aria-hidden="true" focusable="false" width="0" height="0" style="position: absolute">
@@ -83,7 +103,7 @@
       <div class="lead-blank" aria-hidden="true"></div>
       <section class="shot shot-scrub" id="shot-1" style="--span: 3.91">
         <div class="shot-sticky">
-          <img class="shot-video" data-reel="shot-1" src="assets/frames/shot-1/000.jpg?v=2" alt="" fetchpriority="high" />
+          <img class="shot-video" data-reel="shot-1" src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAAQABAAD//gAPTGF2YzYzLjEuMTAyAP/bAEMACBgYHBgcISEhISEhJyQnKCgoJycnJygoKCsrKzMzMysrKygoKyswMDMzNzk3NDQzNDk5PDw8SEhFRVRUV2dnfP/EAGUAAQEBAQEAAAAAAAAAAAAAAAQFBgEHAQEBAQAAAAAAAAAAAAAAAAABAgAQAAEDAwMEAQUBAAAAAAAAAAECADEhAxEEEkGBcbFRMqEUE0PhFREBAQAAAAAAAAAAAAAAAAAAAAH/wAARCAASACADASIAAhEAAxEA/9oADAMBAAIRAxEAPwCaizbKswOa8d3qz/mbtu4ZHorP1h+RpsXwCAn+vd29Dp8p3Zg5FZpHNKsEc1H2e8fjUIrVU9XHuHSpRGVAGFc9m69orP69w95r5YU6RKU1GTWvh0lsER1DskDMOOiOodoy1MAXwzL+DXckMy/gHg//2Q==" alt="" />
           <div class="shade"></div>
           <button class="scroll-cue" type="button">Scroll</button>
         </div>
@@ -341,6 +361,6 @@
     </div>
 
     <audio id="music" src="assets/coat.mp3?v=2" loop preload="none"></audio>
-    <script src="main.js?v=114" defer></script>
+    <script src="main.js?v=119" defer></script>
   </body>
 </html>

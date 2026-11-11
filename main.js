@@ -160,7 +160,10 @@ function render() {
   const max = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
   progressBar.style.width = `${(scroller.scrollTop / max) * 100}%`;
   nav.classList.toggle("is-solid", scroller.scrollTop > shot1.offsetTop + scroller.clientHeight * 0.72);
-  if (reduceMotion) return;
+  if (reduceMotion) {
+    paintStills();
+    return;
+  }
   paintFilms();
   if (sectionOnScreen(shot3)) shot3.classList.toggle("is-cabin", Number(play3.dataset.part || 0) >= shot3CabinAt);
 }
@@ -173,7 +176,31 @@ function sectionOnScreen(section) {
   return bottom > viewTop + 24 && top < viewBottom - 24;
 }
 
-const reels = {};
+// Inlined so the first frame can be requested without waiting on a manifest
+// round trip. tools/build-frames.mjs rewrites this block; keep the markers.
+const reels = /* REELS:START */ {
+  "shot-1": {
+    "duration": 16,
+    "fps": 10,
+    "count": 160
+  },
+  "shot-2": {
+    "duration": 12.07,
+    "fps": 10,
+    "count": 121
+  },
+  "shot-3": {
+    "duration": 15.97,
+    "fps": 10,
+    "count": 160
+  },
+  "shot-4": {
+    "duration": 19.2,
+    "fps": 10,
+    "count": 192
+  }
+} /* REELS:END */;
+
 const reelLength = {
   "shot-1": 16,
   "shot-2": 12.07,
@@ -187,8 +214,28 @@ function reelDuration(video) {
   return reelLength[video.dataset.reel] || 16;
 }
 
+// Three encodes of the same frames, picked by how many device pixels the film
+// actually covers: desktops take the 1280 master, retina phones take a 1080
+// cut (a 402pt iPhone spans 1206 device pixels, so 720 looked soft there) and
+// 1x phones keep the 720 cut, where the extra pixels would never be shown.
+// The media queries on the preload links in index.html mirror this exactly.
+const TIER_WIDE = "1280";
+const TIER_RETINA_PHONE = "1080";
+const TIER_PHONE = "720";
+
+function pickTier() {
+  const connection = navigator.connection;
+  if (connection && connection.saveData) return TIER_PHONE;
+  if (window.innerWidth >= 900) return TIER_WIDE;
+  const dpr = window.devicePixelRatio || 1;
+  return dpr >= 2 ? TIER_RETINA_PHONE : TIER_PHONE;
+}
+
+const frameTier = pickTier();
+const dataSaver = Boolean(navigator.connection && navigator.connection.saveData);
+
 function partFile(id, index) {
-  return `assets/frames/${id}/${String(index).padStart(3, "0")}.jpg?v=2`;
+  return `assets/frames/${frameTier}/${id}/${String(index).padStart(3, "0")}.jpg?v=3`;
 }
 
 function frameIndex(reel, progress) {
@@ -197,7 +244,41 @@ function frameIndex(reel, progress) {
 
 const frameCache = new Map();
 const frameQueue = [];
+const queuedAt = new Map();
 let frameSlots = 0;
+let scrollDirection = 1;
+let lastScrollTop = 0;
+let fillTimer = 0;
+
+// A long visit can touch all 633 frames. At 1080x608 each one is ~2.6 MB of
+// decoded pixels, so the cache is capped and trimmed by distance from the
+// playhead rather than by insertion order: the frames about to be shown are
+// the last thing to go. Roughly 120 MB of decoded frames at every tier.
+const FRAME_BUDGET = frameTier === "1280" ? 34 : frameTier === "1080" ? 46 : 96;
+const FRAME_KEEP = 24;
+let activeReel = "shot-1";
+let activeIndex = 0;
+
+function framePlace(url) {
+  const match = /\/frames\/[^/]+\/([^/]+)\/(\d+)\.jpg/.exec(url);
+  return match ? { reel: match[1], index: Number(match[2]) } : null;
+}
+
+function trimFrames() {
+  if (frameCache.size <= FRAME_BUDGET) return;
+  const spare = [];
+  for (const [url, value] of frameCache) {
+    if (typeof value === "string") continue; // in flight, or already failed
+    const place = framePlace(url);
+    const distance = place && place.reel === activeReel ? Math.abs(place.index - activeIndex) : Number.MAX_SAFE_INTEGER;
+    if (distance <= FRAME_KEEP) continue;
+    spare.push({ url, distance });
+  }
+  spare.sort((a, b) => b.distance - a.distance);
+  for (let i = 0; i < spare.length && frameCache.size > FRAME_BUDGET; i += 1) {
+    frameCache.delete(spare[i].url);
+  }
+}
 
 function keepOpeningFrame() {
   const opening = partFile("shot-1", 0);
@@ -217,21 +298,46 @@ function keepOpeningFrame() {
 
 keepOpeningFrame();
 
-function enqueueFrame(url) {
-  if (frameCache.has(url) || frameQueue.includes(url)) return;
-  frameQueue.push(url);
+// Six requests in flight is the browser's per-host ceiling on HTTP/1.1 and
+// keeps an HTTP/2 connection busy; three was the old bottleneck.
+const MAX_FRAME_SLOTS = 6;
+const AHEAD_FRAMES = 22;
+const BEHIND_FRAMES = 8;
+
+function enqueueFrame(url, priority = 50) {
+  if (frameCache.has(url)) return;
+  const queued = queuedAt.get(url);
+  if (queued !== undefined) {
+    if (queued <= priority) return;
+    for (let i = 0; i < frameQueue.length; i += 1) {
+      if (frameQueue[i].url === url) {
+        frameQueue[i].priority = priority;
+        break;
+      }
+    }
+    queuedAt.set(url, priority);
+    return;
+  }
+  frameQueue.push({ url, priority });
+  queuedAt.set(url, priority);
 }
 
 function pumpFrames() {
-  while (frameSlots < 3 && frameQueue.length) {
-    const url = frameQueue.shift();
-    if (frameCache.has(url)) continue;
-    frameCache.set(url, "loading");
+  if (frameQueue.length > 1) frameQueue.sort((a, b) => a.priority - b.priority);
+  while (frameSlots < MAX_FRAME_SLOTS && frameQueue.length) {
+    const job = frameQueue.shift();
+    queuedAt.delete(job.url);
+    if (frameCache.has(job.url)) continue;
+    frameCache.set(job.url, "loading");
     frameSlots += 1;
     const image = new Image();
+    image.decoding = "async";
+    // The runway in front of the playhead outranks the background fill.
+    if ("fetchPriority" in image) image.fetchPriority = job.priority < 8 ? "high" : "low";
     const settle = (value) => {
-      frameCache.set(url, value);
+      frameCache.set(job.url, value);
       frameSlots -= 1;
+      trimFrames();
       pumpFrames();
       render();
     };
@@ -243,18 +349,67 @@ function pumpFrames() {
       settle(image);
     };
     image.onerror = () => settle("error");
-    image.src = url;
+    image.src = job.url;
   }
 }
 
+// Rebuilds the pending queue around the playhead, weighted towards where the
+// scroll is heading. Requests already in flight are never dropped, so a fast
+// scroll no longer restarts the reel from the current frame on every tick.
 function queueReel(id, count, center) {
   frameQueue.length = 0;
-  for (let step = 0; step < count; step += 1) {
-    const ahead = center + step;
-    const behind = center - step;
-    if (ahead >= 0 && ahead < count) enqueueFrame(partFile(id, ahead));
-    if (step && behind >= 0 && behind < count) enqueueFrame(partFile(id, behind));
+  queuedAt.clear();
+  const forward = scrollDirection >= 0;
+  const ahead = forward ? AHEAD_FRAMES : BEHIND_FRAMES;
+  const behind = forward ? BEHIND_FRAMES : AHEAD_FRAMES;
+  for (let step = 0; step <= Math.max(ahead, behind); step += 1) {
+    const front = forward ? center + step : center - step;
+    const back = forward ? center - step : center + step;
+    if (step <= ahead && front >= 0 && front < count) enqueueFrame(partFile(id, front), step);
+    if (step && step <= behind && back >= 0 && back < count) enqueueFrame(partFile(id, back), step + 4);
   }
+  pumpFrames();
+}
+
+// Once a real scroll settles, quietly extend the runway ahead of the playhead
+// so a fast flick later never waits. Never runs before the visitor interacts,
+// so the first paint is not competing with a megabyte of frames, and never
+// fetches a whole reel. Off on save-data connections.
+const FILL_AHEAD = 60;
+const FILL_BEHIND = 16;
+let hasScrolled = false;
+
+function scheduleFill(id, count, center) {
+  clearTimeout(fillTimer);
+  if (dataSaver || !hasScrolled) return;
+  fillTimer = setTimeout(() => {
+    for (let step = 0; step <= FILL_AHEAD; step += 1) {
+      const ahead = center + step;
+      if (ahead < count) enqueueFrame(partFile(id, ahead), 80 + step);
+    }
+    for (let step = 1; step <= FILL_BEHIND; step += 1) {
+      const behind = center - step;
+      if (behind >= 0) enqueueFrame(partFile(id, behind), 80 + step);
+    }
+    pumpFrames();
+  }, 300);
+}
+
+const reelOrder = ["shot-1", "shot-2", "shot-3", "shot-4"];
+
+// Fetches the head of the next reel while the current chapter is being read, so
+// the hand-off never waits on the network.
+function prewarmNext(picture) {
+  const id = picture.dataset.reel;
+  const next = reelOrder[reelOrder.indexOf(id) + 1];
+  const reel = reels[next];
+  if (!reel || !reel.count) return;
+  const section = document.getElementById(next);
+  if (!section) return;
+  const view = scroller.clientHeight;
+  if (section.offsetTop > scroller.scrollTop + view * 2.2) return;
+  const head = Math.min(12, reel.count);
+  for (let index = 0; index < head; index += 1) enqueueFrame(partFile(next, index), 60 + index);
   pumpFrames();
 }
 
@@ -284,6 +439,10 @@ function holdFilm(picture, section, queue) {
   if (!near) return;
   const progress = sectionOnScreen(section) ? sectionProgress(section) : mid > section.offsetTop ? 1 : 0;
   const index = frameIndex(reel, progress);
+  if (queue) {
+    activeReel = id;
+    activeIndex = index;
+  }
   const ready = nearestFrame(id, reel.count, index);
   if (ready && picture.dataset.shown !== String(ready.index)) {
     picture.dataset.shown = String(ready.index);
@@ -293,7 +452,35 @@ function holdFilm(picture, section, queue) {
   if (queue && picture.dataset.center !== String(index)) {
     picture.dataset.center = String(index);
     queueReel(id, reel.count, index);
+    scheduleFill(id, reel.count, index);
   }
+}
+// Reduced motion: the scrub is off, but every chapter still paints its own
+// still frame as it comes into view, so nothing is left as a black panel or a
+// blurred placeholder. One frame per reel, fetched only when the chapter is
+// within reach, and it never swaps again afterwards.
+function paintStills() {
+  films.forEach(([picture, section]) => {
+    const id = picture.dataset.reel;
+    const reel = reels[id];
+    if (!reel || !reel.count) return;
+    const view = scroller.clientHeight;
+    const mid = scroller.scrollTop + view * 0.42;
+    const near = mid > section.offsetTop - view * 0.6 && mid < section.offsetTop + section.offsetHeight + view * 0.6;
+    if (!near) return;
+    activeReel = id;
+    activeIndex = 0;
+    const ready = nearestFrame(id, reel.count, 0);
+    if (ready) {
+      if (picture.dataset.shown === String(ready.index)) return;
+      picture.dataset.shown = String(ready.index);
+      picture.dataset.part = String(ready.index / reel.fps);
+      picture.src = ready.image.src;
+      return;
+    }
+    enqueueFrame(partFile(id, 0), 1);
+    pumpFrames();
+  });
 }
 
 function paintFilms() {
@@ -310,6 +497,7 @@ function paintFilms() {
     }
   });
   films.forEach(([picture, section]) => holdFilm(picture, section, picture === focus));
+  if (focus) prewarmNext(focus);
 }
 
 function applyScrub(video) {
@@ -341,30 +529,31 @@ function layoutFilms() {
   const phone = window.matchMedia("(max-width: 899px) and (orientation: portrait)").matches && !landscapeTurned();
   if (!phone) {
     films.forEach(([picture, section]) => {
-      section.style.setProperty("--span", (1 + reelDuration(picture) / 5.5).toFixed(2));
+      // Reduced motion has no scrub, so there is nothing to travel through:
+      // one screen per chapter keeps each still readable instead of asking the
+      // visitor to scroll four empty viewports before the next one arrives.
+      const span = reduceMotion ? 1 : 1 + reelDuration(picture) / 5.5;
+      section.style.setProperty("--span", span.toFixed(2));
     });
     return;
   }
   const view = scroller.clientHeight;
-  const travel = Math.round(view * 0.72);
+  const travel = reduceMotion ? 0 : Math.round(view * 0.72);
   films.forEach(([, section]) => {
     section.style.height = `${view + travel}px`;
   });
 }
 
-fetch("assets/frames/manifest.json?v=2")
-  .then((response) => response.json())
-  .then((data) => {
-    Object.assign(reels, data);
-    layoutFilms();
-    render();
-  })
-  .catch(() => {});
-
 function onScroll() {
   if (scrollTick) return;
   scrollTick = requestAnimationFrame(() => {
     scrollTick = 0;
+    const top = scroller.scrollTop;
+    if (Math.abs(top - lastScrollTop) > 1) {
+      scrollDirection = top > lastScrollTop ? 1 : -1;
+      hasScrolled = true;
+    }
+    lastScrollTop = top;
     render();
   });
 }

@@ -11,6 +11,7 @@
   --sans: "Outfit", "Segoe UI", sans-serif;
   --nav: 5.2rem;
   --screen-w: 100%;
+  --screen-h: 100vh;
   --screen-h: 100dvh;
 }
 
@@ -60,6 +61,11 @@ body {
   font-family: var(--sans);
   font-weight: 300;
   line-height: 1.6;
+  /* iOS renders light type on black with a heavier, fuzzier stroke than macOS
+     and Android; grayscale smoothing keeps the serif hairlines crisp. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 #screen {
@@ -246,6 +252,7 @@ textarea {
 
 .nav.is-solid {
   background: rgba(12, 11, 10, 0.88);
+  -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--line);
 }
