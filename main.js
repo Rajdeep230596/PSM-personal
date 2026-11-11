@@ -223,15 +223,22 @@ const TIER_WIDE = "1280";
 const TIER_RETINA_PHONE = "1080";
 const TIER_PHONE = "720";
 
+// The film is drawn at the viewport width, so what matters is css width x
+// device pixel ratio, not the ratio alone: an iPhone SE spans 750 device
+// pixels and is wasteful on the 1080 cut, while a Pro Max spans 1320 and needs
+// more than it. Pick the smallest encode that covers the screen to within 15%.
+// index.html runs the same rule in its bootstrap so the preloads match.
 function pickTier() {
   const connection = navigator.connection;
   if (connection && connection.saveData) return TIER_PHONE;
-  if (window.innerWidth >= 900) return TIER_WIDE;
-  const dpr = window.devicePixelRatio || 1;
-  return dpr >= 2 ? TIER_RETINA_PHONE : TIER_PHONE;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const need = Math.round((window.innerWidth || 390) * dpr * 0.85);
+  if (need <= 720) return TIER_PHONE;
+  if (need <= 1080) return TIER_RETINA_PHONE;
+  return TIER_WIDE;
 }
 
-const frameTier = pickTier();
+const frameTier = window.__psmTier || pickTier();
 const dataSaver = Boolean(navigator.connection && navigator.connection.saveData);
 
 function partFile(id, index) {

@@ -20,27 +20,28 @@
     <link rel="preload" href="assets/fonts/cormorant-500.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/cormorant-italic.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin />
-    <!-- The opening runway starts at parse time, before main.js is even parsed,
-         so the first second of scrolling never waits on the script. Each tier is
-         gated by the same rule pickTier() uses in main.js. -->
-    <link rel="preload" href="assets/frames/1280/shot-1/000.jpg?v=3" as="image" fetchpriority="high" media="(min-width: 900px)" />
-    <link rel="preload" href="assets/frames/1280/shot-1/001.jpg?v=3" as="image" fetchpriority="high" media="(min-width: 900px)" />
-    <link rel="preload" href="assets/frames/1280/shot-1/002.jpg?v=3" as="image" fetchpriority="high" media="(min-width: 900px)" />
-    <link rel="preload" href="assets/frames/1280/shot-1/003.jpg?v=3" as="image" fetchpriority="high" media="(min-width: 900px)" />
-    <link rel="preload" href="assets/frames/1280/shot-1/004.jpg?v=3" as="image" media="(min-width: 900px)" />
-    <link rel="preload" href="assets/frames/1280/shot-1/005.jpg?v=3" as="image" media="(min-width: 900px)" />
-    <link rel="preload" href="assets/frames/1080/shot-1/000.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
-    <link rel="preload" href="assets/frames/1080/shot-1/001.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
-    <link rel="preload" href="assets/frames/1080/shot-1/002.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
-    <link rel="preload" href="assets/frames/1080/shot-1/003.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
-    <link rel="preload" href="assets/frames/1080/shot-1/004.jpg?v=3" as="image" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
-    <link rel="preload" href="assets/frames/1080/shot-1/005.jpg?v=3" as="image" media="(max-width: 899px) and (-webkit-min-device-pixel-ratio: 2)" />
-    <link rel="preload" href="assets/frames/720/shot-1/000.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
-    <link rel="preload" href="assets/frames/720/shot-1/001.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
-    <link rel="preload" href="assets/frames/720/shot-1/002.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
-    <link rel="preload" href="assets/frames/720/shot-1/003.jpg?v=3" as="image" fetchpriority="high" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
-    <link rel="preload" href="assets/frames/720/shot-1/004.jpg?v=3" as="image" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
-    <link rel="preload" href="assets/frames/720/shot-1/005.jpg?v=3" as="image" media="(max-width: 899px) and (-webkit-max-device-pixel-ratio: 1.99)" />
+    <!-- One tier is chosen here, while the head is still parsing, and its
+         opening frames are preloaded: the film starts downloading before the
+         stylesheet, and main.js reuses this choice instead of re-deriving it.
+         Selection is by device pixels (css width x dpr) with 15% of upscale
+         allowed, so a Pro Max stays crisp and an SE stays light. -->
+    <script>
+      (function () {
+        var connection = navigator.connection;
+        var dpr = Math.min(window.devicePixelRatio || 1, 3);
+        var need = Math.round((window.innerWidth || 390) * dpr * 0.85);
+        var tier = connection && connection.saveData ? "720" : need <= 720 ? "720" : need <= 1080 ? "1080" : "1280";
+        window.__psmTier = tier;
+        for (var i = 0; i < 6; i += 1) {
+          var link = document.createElement("link");
+          link.rel = "preload";
+          link.as = "image";
+          link.setAttribute("href", "assets/frames/" + tier + "/shot-1/00" + i + ".jpg?v=3");
+          if (i < 4) link.setAttribute("fetchpriority", "high");
+          document.head.appendChild(link);
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="styles.css?v=60" />
   </head>
   <body>
@@ -361,6 +362,6 @@
     </div>
 
     <audio id="music" src="assets/coat.mp3?v=2" loop preload="none"></audio>
-    <script src="main.js?v=119" defer></script>
+    <script src="main.js?v=120" defer></script>
   </body>
 </html>
