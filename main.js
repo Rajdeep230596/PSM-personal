@@ -319,9 +319,19 @@ function keepOpeningFrame() {
 
 keepOpeningFrame();
 
-// Six requests in flight is the browser's per-host ceiling on HTTP/1.1 and
-// keeps an HTTP/2 connection busy; three was the old bottleneck.
-const MAX_FRAME_SLOTS = 6;
+// Six in flight is the per-host ceiling on HTTP/1.1, but the host serves the
+// films over HTTP/2, where one connection carries many streams. Ask for more
+// frames at once when the page itself arrived over a multiplexed protocol.
+const MULTIPLEXED = (() => {
+  try {
+    const nav = performance.getEntriesByType("navigation")[0];
+    const proto = nav && nav.nextHopProtocol;
+    return proto === "h2" || proto === "h3";
+  } catch (err) {
+    return false;
+  }
+})();
+const MAX_FRAME_SLOTS = MULTIPLEXED ? 12 : 6;
 const AHEAD_FRAMES = 22;
 const BEHIND_FRAMES = 8;
 
