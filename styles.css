@@ -1858,6 +1858,14 @@ h2 {
   text-align: right;
 }
 
+/* The floating WhatsApp bubble owns this corner and used to sit on top of the
+   tilt notice, clipping its last two words on a phone. Lift the cue clear of
+   the bubble rather than shrinking either of them. */
+.shot-sticky .scroll-cue {
+  bottom: calc(max(1.25rem, env(safe-area-inset-bottom)) + 4.6rem);
+  max-width: min(17rem, calc(100vw - 3.25rem));
+}
+
 .interlude {
   position: relative;
   z-index: 2;

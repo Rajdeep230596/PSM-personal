@@ -263,6 +263,11 @@ let fillTimer = 0;
 // the last thing to go. Roughly 120 MB of decoded frames at every tier.
 const FRAME_BUDGET = frameTier === "1280" ? 34 : frameTier === "1080" ? 46 : 96;
 const FRAME_KEEP = 24;
+// The head of the next reel is what the hand-off paints, but it is "infinitely
+// far" from the playhead, so the trim used to throw it away and the prewarm
+// fetched the same frames over and over. These stay pinned instead.
+const PIN_AHEAD = 10;
+const pinnedFrames = new Set();
 let activeReel = "shot-1";
 let activeIndex = 0;
 
@@ -279,6 +284,7 @@ function trimFrames() {
     const place = framePlace(url);
     const distance = place && place.reel === activeReel ? Math.abs(place.index - activeIndex) : Number.MAX_SAFE_INTEGER;
     if (distance <= FRAME_KEEP) continue;
+    if (pinnedFrames.has(url)) continue;
     spare.push({ url, distance });
   }
   spare.sort((a, b) => b.distance - a.distance);
@@ -311,7 +317,7 @@ const MAX_FRAME_SLOTS = 6;
 const AHEAD_FRAMES = 22;
 const BEHIND_FRAMES = 8;
 
-function enqueueFrame(url, priority = 50) {
+function enqueueFrame(url, priority = 50, reserved = false) {
   if (frameCache.has(url)) return;
   const queued = queuedAt.get(url);
   if (queued !== undefined) {
@@ -319,43 +325,84 @@ function enqueueFrame(url, priority = 50) {
     for (let i = 0; i < frameQueue.length; i += 1) {
       if (frameQueue[i].url === url) {
         frameQueue[i].priority = priority;
+        frameQueue[i].reserved = reserved;
         break;
       }
     }
     queuedAt.set(url, priority);
     return;
   }
-  frameQueue.push({ url, priority });
+  frameQueue.push({ url, priority, reserved });
   queuedAt.set(url, priority);
+}
+
+// Two of the six slots are held for the next reel's head. Without them a fast
+// flick fills every slot with runway frames from the current reel, the hand-off
+// arrives with nothing loaded to paint, and the film sits still until the
+// network catches up. That was the 0.8s freeze at a reel change on a phone.
+const RESERVED_SLOTS = 2;
+let reservedInFlight = 0;
+
+function nextJob() {
+  if (reservedInFlight < RESERVED_SLOTS) {
+    const held = frameQueue.findIndex((job) => job.reserved);
+    if (held >= 0) return held;
+  }
+  const normal = frameQueue.findIndex((job) => !job.reserved);
+  return normal >= 0 ? normal : frameQueue.length ? 0 : -1;
 }
 
 function pumpFrames() {
   if (frameQueue.length > 1) frameQueue.sort((a, b) => a.priority - b.priority);
   while (frameSlots < MAX_FRAME_SLOTS && frameQueue.length) {
-    const job = frameQueue.shift();
+    const pick = nextJob();
+    if (pick < 0) break;
+    const job = frameQueue.splice(pick, 1)[0];
     queuedAt.delete(job.url);
     if (frameCache.has(job.url)) continue;
     frameCache.set(job.url, "loading");
     frameSlots += 1;
+    if (job.reserved) reservedInFlight += 1;
     const image = new Image();
     image.decoding = "async";
     // The runway in front of the playhead outranks the background fill.
     if ("fetchPriority" in image) image.fetchPriority = job.priority < 8 ? "high" : "low";
-    const settle = (value) => {
-      frameCache.set(job.url, value);
+    // The network slot is freed the moment the bytes land. Waiting for
+    // decode() to resolve before freeing it deadlocks the loader: decoding a
+    // large frame can take longer than the next five downloads, so all six
+    // slots end up parked on decodes and the film stops advancing until they
+    // finish. That is the freeze-then-jump seen at a reel change on a phone.
+    const release = () => {
+      if (job.reserved) reservedInFlight -= 1;
       frameSlots -= 1;
+    };
+    image.onload = () => {
+      release();
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        frameCache.set(job.url, image);
+        trimFrames();
+        render();
+      };
+      if (image.decode) {
+        image.decode().then(finish, finish);
+        // A frame that never reports decoded still gets used, exactly as it
+        // did before decode() was called at all, rather than being dropped.
+        setTimeout(finish, 1500);
+      } else {
+        finish();
+      }
+      pumpFrames();
+    };
+    image.onerror = () => {
+      release();
+      frameCache.set(job.url, "error");
       trimFrames();
       pumpFrames();
       render();
     };
-    image.onload = () => {
-      if (image.decode) {
-        image.decode().then(() => settle(image)).catch(() => settle(image));
-        return;
-      }
-      settle(image);
-    };
-    image.onerror = () => settle("error");
     image.src = job.url;
   }
 }
@@ -364,8 +411,16 @@ function pumpFrames() {
 // scroll is heading. Requests already in flight are never dropped, so a fast
 // scroll no longer restarts the reel from the current frame on every tick.
 function queueReel(id, count, center) {
+  // Reserved next-reel work survives a rebuild of the pending queue, otherwise
+  // every scroll tick would throw the prewarm away and re-queue it behind the
+  // runway frames it is meant to get ahead of.
+  const held = frameQueue.filter((job) => job.reserved);
   frameQueue.length = 0;
   queuedAt.clear();
+  for (let i = 0; i < held.length; i += 1) {
+    frameQueue.push(held[i]);
+    queuedAt.set(held[i].url, held[i].priority);
+  }
   const forward = scrollDirection >= 0;
   const ahead = forward ? AHEAD_FRAMES : BEHIND_FRAMES;
   const behind = forward ? BEHIND_FRAMES : AHEAD_FRAMES;
@@ -405,7 +460,11 @@ function scheduleFill(id, count, center) {
 const reelOrder = ["shot-1", "shot-2", "shot-3", "shot-4"];
 
 // Fetches the head of the next reel while the current chapter is being read, so
-// the hand-off never waits on the network.
+// the hand-off never waits on the network. Twelve frames ran out during a fast
+// flick, so the head is warmed to more than a screen's worth and the trigger is
+// moved out; these jobs are reserved (see RESERVED_SLOTS) and outrank fill.
+const PREWARM_FRAMES = 32;
+const PREWARM_VIEWS = 3.2;
 function prewarmNext(picture) {
   const id = picture.dataset.reel;
   const next = reelOrder[reelOrder.indexOf(id) + 1];
@@ -414,9 +473,15 @@ function prewarmNext(picture) {
   const section = document.getElementById(next);
   if (!section) return;
   const view = scroller.clientHeight;
-  if (section.offsetTop > scroller.scrollTop + view * 2.2) return;
-  const head = Math.min(12, reel.count);
-  for (let index = 0; index < head; index += 1) enqueueFrame(partFile(next, index), 60 + index);
+  if (section.offsetTop > scroller.scrollTop + view * PREWARM_VIEWS) {
+    pinnedFrames.clear();
+    return;
+  }
+  pinnedFrames.clear();
+  const pin = Math.min(PIN_AHEAD, reel.count);
+  for (let index = 0; index < pin; index += 1) pinnedFrames.add(partFile(next, index));
+  const head = Math.min(PREWARM_FRAMES, reel.count);
+  for (let index = 0; index < head; index += 1) enqueueFrame(partFile(next, index), 60 + index, true);
   pumpFrames();
 }
 
