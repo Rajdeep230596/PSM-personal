@@ -259,7 +259,6 @@ function frameIndex(reel, progress) {
 
 const frameCache = new Map();
 const frameQueue = [];
-let lastQueuedCenter = -1;
 const queuedAt = new Map();
 let frameSlots = 0;
 let scrollDirection = 1;
@@ -445,30 +444,15 @@ function queueReel(id, count, center) {
     frameQueue.push(held[i]);
     queuedAt.set(held[i].url, held[i].priority);
   }
-  // A fast flick can move the playhead dozens of frames in one tick. Fetching
-  // every frame in that jump would spend the whole budget on frames already
-  // scrolled past, so cover the range coarsely first and fill the gaps behind
-  // it. The picture steps instead of stopping.
-  const jump = Math.abs(center - lastQueuedCenter);
-  const stride = jump >= 8 ? Math.min(8, Math.round(jump / 8) + 1) : 1;
-  lastQueuedCenter = center;
   const forward = scrollDirection >= 0;
   const runway = hasScrolled ? AHEAD_FRAMES : AHEAD_BEFORE_SCROLL;
   const ahead = forward ? runway : BEHIND_FRAMES;
   const behind = forward ? BEHIND_FRAMES : AHEAD_FRAMES;
-  for (let step = 0; step * stride <= Math.max(ahead, behind); step += 1) {
-    const front = forward ? center + step * stride : center - step * stride;
-    const back = forward ? center - step * stride : center + step * stride;
-    if (step * stride <= ahead && front >= 0 && front < count) enqueueFrame(partFile(id, front), step);
-    if (step && step * stride <= behind && back >= 0 && back < count) enqueueFrame(partFile(id, back), step + 4);
-  }
-  if (stride > 1) {
-    for (let offset = -behind; offset <= ahead; offset += 1) {
-      const index = center + offset;
-      if (index < 0 || index >= count) continue;
-      if ((index - center) % stride === 0) continue;
-      enqueueFrame(partFile(id, index), 40 + Math.abs(offset));
-    }
+  for (let step = 0; step <= Math.max(ahead, behind); step += 1) {
+    const front = forward ? center + step : center - step;
+    const back = forward ? center - step : center + step;
+    if (step <= ahead && front >= 0 && front < count) enqueueFrame(partFile(id, front), step);
+    if (step && step <= behind && back >= 0 && back < count) enqueueFrame(partFile(id, back), step + 4);
   }
   pumpFrames();
 }
@@ -566,8 +550,13 @@ function holdFilm(picture, section, queue) {
   }
   // Hold the frame already on screen rather than jumping across a gap; a reel
   // that has never painted still takes whatever is closest so it cannot sit
-  // blank on the way in.
-  let ready = nearestFrame(id, reel.count, index, SHOW_GAP);
+  // blank on the way in. A fast flick outruns the network though, and a fixed
+  // 20-frame limit then froze the picture for the rest of the gesture: the cap
+  // now grows with the distance already scrolled, so the film keeps stepping
+  // in proportion to the hand instead of stopping dead.
+  const shown = Number(picture.dataset.shown);
+  const gap = Number.isFinite(shown) ? Math.max(SHOW_GAP, Math.abs(index - shown)) : SHOW_GAP;
+  let ready = nearestFrame(id, reel.count, index, gap);
   if (!ready && !picture.dataset.shown) ready = nearestFrame(id, reel.count, index);
   if (ready && picture.dataset.shown !== String(ready.index)) {
     picture.dataset.shown = String(ready.index);
