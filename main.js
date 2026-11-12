@@ -31,6 +31,14 @@ function landscapeTurned() {
   return document.documentElement.classList.contains("force-landscape");
 }
 
+// True only while the stage is being rotated for us. Once the phone is held
+// landscape the browser scrolls natively, and the drag handler has to stand
+// down or the two fight each other.
+function rotatedNow() {
+  const view = viewportSize();
+  return forceLandscape && view.height > view.width;
+}
+
 function fitScreen() {
   const view = viewportSize();
   const turned = forceLandscape && view.height > view.width;
@@ -682,7 +690,42 @@ function paintCue() {
   else filmCue.removeAttribute("aria-pressed");
 }
 
+// The phone and tilted layouts size the films differently, so the same scroll
+// offset lands somewhere else after the switch. Remember what is under the
+// middle of the screen and put it back there.
+function contentTopOf(el) {
+  let y = 0;
+  let node = el;
+  while (node && node !== scroller) {
+    y += node.offsetTop;
+    node = node.offsetParent;
+    if (!node || node === document.body) break;
+  }
+  return y;
+}
+
+function scrollAnchor() {
+  const view = scroller.clientHeight;
+  const mid = scroller.scrollTop + view * 0.5;
+  const sections = document.querySelectorAll("main > section, .sheet > section, #contact, .site-foot");
+  for (const section of sections) {
+    const top = contentTopOf(section);
+    if (top <= mid && top + section.offsetHeight > mid) {
+      return { section, progress: (mid - top) / Math.max(1, section.offsetHeight) };
+    }
+  }
+  return null;
+}
+
+function restoreAnchor(anchor) {
+  if (!anchor || !anchor.section.isConnected) return;
+  const view = scroller.clientHeight;
+  const target = contentTopOf(anchor.section) + anchor.progress * anchor.section.offsetHeight - view * 0.5;
+  scroller.scrollTop = Math.max(0, Math.min(scroller.scrollHeight - view, target));
+}
+
 function useLandscape(on) {
+  const anchor = scrollAnchor();
   const orientation = window.screen.orientation;
   if (on) {
     if (orientation && typeof orientation.lock === "function") orientation.lock("landscape").catch(() => {});
@@ -701,6 +744,7 @@ function useLandscape(on) {
     stopLandscapeGlide();
   }
   fitScreen();
+  restoreAnchor(anchor);
   paintCue();
   render();
 }
@@ -732,7 +776,7 @@ function startLandscapeGlide(velocity) {
   stopLandscapeGlide();
   landscapeGlide = velocity;
   const step = () => {
-    if (!landscapeTurned() || Math.abs(landscapeGlide) < 0.35) {
+    if (!rotatedNow() || Math.abs(landscapeGlide) < 0.35) {
       landscapeGlideFrame = 0;
       landscapeGlide = 0;
       return;
@@ -745,7 +789,7 @@ function startLandscapeGlide(velocity) {
 }
 
 scroller.addEventListener("pointerdown", (event) => {
-  if (!landscapeTurned() || event.button !== 0) return;
+  if (!rotatedNow() || event.button !== 0) return;
   if (event.target.closest("input, textarea, select, .ipad-screen, a, button")) return;
   stopLandscapeGlide();
   landscapePointer = {
@@ -760,7 +804,7 @@ scroller.addEventListener("pointerdown", (event) => {
 });
 
 scroller.addEventListener("pointermove", (event) => {
-  if (!landscapePointer || event.pointerId !== landscapePointer.id || !landscapeTurned()) return;
+  if (!landscapePointer || event.pointerId !== landscapePointer.id || !rotatedNow()) return;
   const dx = event.clientX - landscapePointer.x;
   const dy = event.clientY - landscapePointer.y;
   if (!landscapePointer.dragging) {
