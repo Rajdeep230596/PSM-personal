@@ -274,7 +274,7 @@ const FRAME_KEEP = 24;
 // The head of the next reel is what the hand-off paints, but it is "infinitely
 // far" from the playhead, so the trim used to throw it away and the prewarm
 // fetched the same frames over and over. These stay pinned instead.
-const PIN_AHEAD = 10;
+const PIN_AHEAD = 6;
 const pinnedFrames = new Set();
 let activeReel = "shot-1";
 let activeIndex = 0;
@@ -348,7 +348,7 @@ function enqueueFrame(url, priority = 50, reserved = false) {
 // flick fills every slot with runway frames from the current reel, the hand-off
 // arrives with nothing loaded to paint, and the film sits still until the
 // network catches up. That was the 0.8s freeze at a reel change on a phone.
-const RESERVED_SLOTS = 2;
+const RESERVED_SLOTS = 1;
 let reservedInFlight = 0;
 
 function nextJob() {
@@ -471,8 +471,11 @@ const reelOrder = ["shot-1", "shot-2", "shot-3", "shot-4"];
 // the hand-off never waits on the network. Twelve frames ran out during a fast
 // flick, so the head is warmed to more than a screen's worth and the trigger is
 // moved out; these jobs are reserved (see RESERVED_SLOTS) and outrank fill.
-const PREWARM_FRAMES = 32;
-const PREWARM_VIEWS = 3.2;
+const PREWARM_FRAMES = 20;
+// Under one screen: the prewarm used to fire from the moment the page loaded,
+// so a third of the download slots went to a reel nobody had reached yet and
+// the reel on screen arrived slower. It now waits until the hand-off is close.
+const PREWARM_VIEWS = 1.2;
 function prewarmNext(picture) {
   const id = picture.dataset.reel;
   const next = reelOrder[reelOrder.indexOf(id) + 1];
