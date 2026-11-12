@@ -519,6 +519,44 @@ h2 {
   padding: 0;
 }
 
+/* The conversation form is back in the page flow between the last film and the
+   vendor wall, instead of being hidden inside the tablet mock behind a button. */
+.contact-panel {
+  position: relative;
+  z-index: 2;
+  background: transparent;
+}
+
+.contact-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.1rem 1.6rem;
+  max-width: 46rem;
+}
+
+.contact-form .ipad-field {
+  margin: 0;
+}
+
+.contact-form .contact-message,
+.contact-form .form-status,
+.contact-form .ipad-send {
+  grid-column: 1 / -1;
+}
+
+.contact-form .ipad-send {
+  width: auto;
+  min-width: 12rem;
+  padding-inline: 2rem;
+  justify-self: start;
+}
+
+@media (min-width: 760px) {
+  .contact-form {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 .connect-cta {
   position: absolute;
   z-index: 60;
@@ -1447,11 +1485,6 @@ h2 {
   position: relative;
   z-index: 1;
   background: #050607;
-}
-
-.lead-blank {
-  height: clamp(6.5rem, calc(var(--screen-h) * 0.16), 11rem);
-  background: #000;
 }
 
 .shot-play {

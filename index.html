@@ -42,7 +42,7 @@
         }
       })();
     </script>
-    <link rel="stylesheet" href="styles.css?v=61" />
+    <link rel="stylesheet" href="styles.css?v=62" />
   </head>
   <body>
     <svg aria-hidden="true" focusable="false" width="0" height="0" style="position: absolute">
@@ -101,7 +101,6 @@
     <div class="scroller" id="scroller">
     <a class="skip" href="#shot-2">Skip to story</a>
     <main>
-      <div class="lead-blank" aria-hidden="true"></div>
       <section class="shot shot-scrub" id="shot-1" style="--span: 3.91">
         <div class="shot-sticky">
           <img class="shot-video" data-reel="shot-1" src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAAQABAAD//gAPTGF2YzYzLjEuMTAyAP/bAEMACBgYHBgcISEhISEhJyQnKCgoJycnJygoKCsrKzMzMysrKygoKyswMDMzNzk3NDQzNDk5PDw8SEhFRVRUV2dnfP/EAGUAAQEBAQEAAAAAAAAAAAAAAAQFBgEHAQEBAQAAAAAAAAAAAAAAAAABAgAQAAEDAwMEAQUBAAAAAAAAAAECADEhAxEEEkGBcbFRMqEUE0PhFREBAQAAAAAAAAAAAAAAAAAAAAH/wAARCAASACADASIAAhEAAxEA/9oADAMBAAIRAxEAPwCaizbKswOa8d3qz/mbtu4ZHorP1h+RpsXwCAn+vd29Dp8p3Zg5FZpHNKsEc1H2e8fjUIrVU9XHuHSpRGVAGFc9m69orP69w95r5YU6RKU1GTWvh0lsER1DskDMOOiOodoy1MAXwzL+DXckMy/gHg//2Q==" alt="" />
@@ -240,39 +239,38 @@
             </ul>
           </section>
           <button class="connect-cta" id="connect" type="button">Connect With Us</button>
-          <form class="ipad shot-form" id="contact-form" aria-labelledby="ipad-title">
-            <div class="ipad-device">
-              <div class="ipad-screen">
-                <button class="ipad-close" type="button" aria-label="Close">Close</button>
-                <p class="kicker">PSM Infinity</p>
-                <h2 id="ipad-title">Begin a conversation.</h2>
-                <label class="ipad-field">
-                  <span>Name</span>
-                  <input name="name" type="text" autocomplete="name" required />
-                </label>
-                <label class="ipad-field">
-                  <span>Email</span>
-                  <input name="email" type="email" autocomplete="email" required />
-                </label>
-                <label class="ipad-field">
-                  <span>Country</span>
-                  <input name="country" type="text" autocomplete="country-name" required />
-                </label>
-                <label class="ipad-field">
-                  <span>Contact</span>
-                  <input name="contact" type="tel" autocomplete="tel" inputmode="tel" required />
-                </label>
-                <label class="ipad-field">
-                  <span>Message</span>
-                  <textarea name="message" rows="4" required></textarea>
-                </label>
-                <p class="form-status" id="form-status" role="status"></p>
-                <button class="ipad-send" type="submit">Send</button>
-              </div>
-            </div>
-          </form>
       </section>
 
+      <section class="panel contact-panel" id="contact" aria-label="Contact">
+        <div class="panel-head">
+          <p class="kicker">Contact</p>
+          <h2>Begin a conversation.</h2>
+        </div>
+        <form class="contact-form" id="contact-form">
+          <label class="ipad-field">
+            <span>Name</span>
+            <input name="name" type="text" autocomplete="name" required />
+          </label>
+          <label class="ipad-field">
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" required />
+          </label>
+          <label class="ipad-field">
+            <span>Country</span>
+            <input name="country" type="text" autocomplete="country-name" required />
+          </label>
+          <label class="ipad-field">
+            <span>Contact</span>
+            <input name="contact" type="tel" autocomplete="tel" inputmode="tel" required />
+          </label>
+          <label class="ipad-field contact-message">
+            <span>Message</span>
+            <textarea name="message" rows="4" required></textarea>
+          </label>
+          <p class="form-status" id="form-status" role="status"></p>
+          <button class="ipad-send" type="submit">Send</button>
+        </form>
+      </section>
       <div class="sheet">
         <section class="panel vendors" id="vendors" aria-label="Vendor portfolio">
           <div class="panel-head">
@@ -362,6 +360,6 @@
     </div>
 
     <audio id="music" src="assets/coat.mp3?v=2" loop preload="none"></audio>
-    <script src="main.js?v=122" defer></script>
+    <script src="main.js?v=123" defer></script>
   </body>
 </html>

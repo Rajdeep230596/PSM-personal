@@ -485,8 +485,14 @@ function prewarmNext(picture) {
   pumpFrames();
 }
 
-function nearestFrame(id, count, index) {
-  for (let step = 0; step < count; step += 1) {
+// A missing frame must never transport the picture. Without a cap the nearest
+// loaded frame can be a screenful away, so the film appears to skip ahead when
+// the runway has a hole in it.
+const SHOW_GAP = 20;
+
+function nearestFrame(id, count, index, maxGap = Infinity) {
+  const reach = Math.min(maxGap, count);
+  for (let step = 0; step < reach; step += 1) {
     const ahead = index + step;
     const behind = index - step;
     if (ahead < count) {
@@ -515,7 +521,11 @@ function holdFilm(picture, section, queue) {
     activeReel = id;
     activeIndex = index;
   }
-  const ready = nearestFrame(id, reel.count, index);
+  // Hold the frame already on screen rather than jumping across a gap; a reel
+  // that has never painted still takes whatever is closest so it cannot sit
+  // blank on the way in.
+  let ready = nearestFrame(id, reel.count, index, SHOW_GAP);
+  if (!ready && !picture.dataset.shown) ready = nearestFrame(id, reel.count, index);
   if (ready && picture.dataset.shown !== String(ready.index)) {
     picture.dataset.shown = String(ready.index);
     picture.dataset.part = String(ready.index / reel.fps);
@@ -867,12 +877,14 @@ function closeForm() {
 
 const connect = document.getElementById("connect");
 connect.addEventListener("click", () => {
-  form.classList.add("is-open");
-  shot4.classList.add("is-form-open");
+  // The form is part of the page now: the button takes you to it.
+  const section = document.getElementById("contact");
+  if (section) scroller.scrollTop = section.offsetTop;
   const name = form.querySelector("input[name=name]");
-  if (name) name.focus();
+  if (name) name.focus({ preventScroll: true });
 });
-form.querySelector(".ipad-close").addEventListener("click", closeForm);
+const ipadClose = form.querySelector(".ipad-close");
+if (ipadClose) ipadClose.addEventListener("click", closeForm);
 
 document.getElementById("year").textContent = String(new Date().getFullYear());
 
