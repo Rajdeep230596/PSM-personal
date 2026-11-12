@@ -259,6 +259,7 @@ function frameIndex(reel, progress) {
 
 const frameCache = new Map();
 const frameQueue = [];
+let lastQueuedCenter = -1;
 const queuedAt = new Map();
 let frameSlots = 0;
 let scrollDirection = 1;
@@ -334,6 +335,11 @@ const MULTIPLEXED = (() => {
 const MAX_FRAME_SLOTS = MULTIPLEXED ? 12 : 6;
 const AHEAD_FRAMES = 22;
 const BEHIND_FRAMES = 8;
+// Before the visitor touches the page there is no direction to guess from, so
+// a long runway is just cold-start weight: 22 frames is ~690 KB on a retina
+// phone. Twelve covers a screen and a bit; the rest arrives on the first
+// scroll, when the loader knows which way to go.
+const AHEAD_BEFORE_SCROLL = 12;
 
 function enqueueFrame(url, priority = 50, reserved = false) {
   if (frameCache.has(url)) return;
@@ -439,14 +445,30 @@ function queueReel(id, count, center) {
     frameQueue.push(held[i]);
     queuedAt.set(held[i].url, held[i].priority);
   }
+  // A fast flick can move the playhead dozens of frames in one tick. Fetching
+  // every frame in that jump would spend the whole budget on frames already
+  // scrolled past, so cover the range coarsely first and fill the gaps behind
+  // it. The picture steps instead of stopping.
+  const jump = Math.abs(center - lastQueuedCenter);
+  const stride = jump >= 8 ? Math.min(8, Math.round(jump / 8) + 1) : 1;
+  lastQueuedCenter = center;
   const forward = scrollDirection >= 0;
-  const ahead = forward ? AHEAD_FRAMES : BEHIND_FRAMES;
+  const runway = hasScrolled ? AHEAD_FRAMES : AHEAD_BEFORE_SCROLL;
+  const ahead = forward ? runway : BEHIND_FRAMES;
   const behind = forward ? BEHIND_FRAMES : AHEAD_FRAMES;
-  for (let step = 0; step <= Math.max(ahead, behind); step += 1) {
-    const front = forward ? center + step : center - step;
-    const back = forward ? center - step : center + step;
-    if (step <= ahead && front >= 0 && front < count) enqueueFrame(partFile(id, front), step);
-    if (step && step <= behind && back >= 0 && back < count) enqueueFrame(partFile(id, back), step + 4);
+  for (let step = 0; step * stride <= Math.max(ahead, behind); step += 1) {
+    const front = forward ? center + step * stride : center - step * stride;
+    const back = forward ? center - step * stride : center + step * stride;
+    if (step * stride <= ahead && front >= 0 && front < count) enqueueFrame(partFile(id, front), step);
+    if (step && step * stride <= behind && back >= 0 && back < count) enqueueFrame(partFile(id, back), step + 4);
+  }
+  if (stride > 1) {
+    for (let offset = -behind; offset <= ahead; offset += 1) {
+      const index = center + offset;
+      if (index < 0 || index >= count) continue;
+      if ((index - center) % stride === 0) continue;
+      enqueueFrame(partFile(id, index), 40 + Math.abs(offset));
+    }
   }
   pumpFrames();
 }
@@ -621,6 +643,10 @@ function applyScrub(video) {
 
 const shot3CabinAt = 8.9;
 
+// Screens of scrolling per reel on a phone. Higher is smoother but longer to
+// scroll: at 0.72 a reel lasted ~630px, now it lasts ~1.8 screens.
+const PHONE_TRAVEL = 1.8;
+
 function layoutFilms() {
   films.forEach(([, section]) => {
     section.style.height = "";
@@ -641,7 +667,11 @@ function layoutFilms() {
     return;
   }
   const view = scroller.clientHeight;
-  const travel = reduceMotion ? 0 : Math.round(view * 0.72);
+  // 0.72 screens of travel meant a whole reel (160 frames, ~4.8 MB at the 1080
+  // cut) played inside 630px of scrolling — one flick demanded the entire reel
+  // before the network could deliver it. A longer travel gives every frame
+  // time to arrive and is what the desktop layout already does.
+  const travel = reduceMotion ? 0 : Math.round(view * PHONE_TRAVEL);
   films.forEach(([, section]) => {
     section.style.height = `${view + travel}px`;
   });
