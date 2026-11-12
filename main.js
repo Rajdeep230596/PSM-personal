@@ -331,7 +331,9 @@ const MULTIPLEXED = (() => {
     return false;
   }
 })();
-const MAX_FRAME_SLOTS = MULTIPLEXED ? 12 : 6;
+// Shared hosting throttles concurrent requests per visitor, and twelve at once
+// made the whole page crawl where six had not. Eight is the modest win.
+const MAX_FRAME_SLOTS = MULTIPLEXED ? 8 : 6;
 const AHEAD_FRAMES = 22;
 const BEHIND_FRAMES = 8;
 // Before the visitor touches the page there is no direction to guess from, so
