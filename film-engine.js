@@ -43,6 +43,11 @@
   const stills = new Map();
   const painted = new Map();
   const shown = new Map();
+  // The opening reel is drawn from frames. Every reel after it is a single
+  // 540p stream: one request instead of eight pages, decoded in hardware, and
+  // the phone's CPU stays free for the scroll itself.
+  const videos = new Map();
+  const videoBroken = new Set();
 
   function crispUrl(id, index) {
     return `assets/frames/${TIER}/${id}/${String(index).padStart(3, "0")}.webp?${ASSET_VERSION}`;
@@ -378,8 +383,8 @@
       canvas.height = targetH;
     }
     const hasRect = typeof sw === "number" && sw > 0;
-    const sourceW = hasRect ? sw : bitmap.width;
-    const sourceH = hasRect ? sh : bitmap.height;
+    const sourceW = hasRect ? sw : bitmap.videoWidth || bitmap.width;
+    const sourceH = hasRect ? sh : bitmap.videoHeight || bitmap.height;
     if (!sourceW || !sourceH) return false;
     const contain = fitOf(id) === "contain";
     const ratio = contain
@@ -408,6 +413,12 @@
       repaintQueued = false;
       const { reel, index } = manager.playhead;
       if (!reel || !manager.booted) return;
+      const video = videoFor(reel);
+      if (video) {
+        if (video.readyState >= 2) drawVideo(reel, video);
+        else scrubVideo(reel, video, index);
+        return;
+      }
       paint(reel, index, SHOW_GAP + 40);
     };
     requestAnimationFrame(run);
@@ -478,6 +489,15 @@
   let activeReel = "";
 
   function scrub(id, index) {
+    const video = videoFor(id);
+    if (video) {
+      if (id !== activeReel) {
+        activeReel = id;
+        prewarm(id);
+      }
+      scrubVideo(id, video, index);
+      return;
+    }
     manager.focus(id, index);
     const total = countOf(id);
     const page = Math.floor(index / SHEET_CELLS);
@@ -517,7 +537,74 @@
 
   function prewarm(id) {
     const next = order[order.indexOf(id) + 1];
-    if (next) fillReel(next, 30);
+    if (!next) return;
+    const video = videoFor(next);
+    if (video) return;
+    fillReel(next, 30);
+  }
+
+  // ------------------------------------------------------------------ video
+
+  function videoFor(id) {
+    if (id === order[0] || videoBroken.has(id)) return null;
+    const existing = videos.get(id);
+    if (existing) return existing;
+    const video = document.createElement("video");
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.setAttribute("muted", "");
+    video.preload = "auto";
+    video.addEventListener("seeked", () => {
+      if (video.dataset.pending !== undefined) drawVideo(id, video);
+    });
+    video.addEventListener("loadeddata", () => {
+      if (video.dataset.pending !== undefined) drawVideo(id, video);
+    });
+    video.addEventListener("error", () => {
+      videoBroken.add(id);
+      videos.delete(id);
+    });
+    video.src = `assets/video/${id}.mp4?v=1`;
+    video.load();
+    videos.set(id, video);
+    return video;
+  }
+
+  function drawVideo(id, video) {
+    if (video.readyState < 2) return false;
+    const mark = `v:${video.currentTime.toFixed(2)}`;
+    if (painted.get(id) === mark) return true;
+    if (!draw(id, video)) return false;
+    painted.set(id, mark);
+    return true;
+  }
+
+  function scrubVideo(id, video, index) {
+    manager.focus(id, index);
+    shown.set(id, index);
+    video.dataset.pending = String(index);
+    if (video.readyState < 2) {
+      // Mid-seek the decoder reports no frame; hold what is already drawn
+      // rather than dropping back to the poster and flickering.
+      if (painted.has(id)) return;
+      const still = stills.get(id);
+      if (still && draw(id, still)) painted.set(id, `p:${still.width}x${still.height}`);
+      return;
+    }
+    const total = Math.max(1, countOf(id) - 1);
+    const duration = video.duration || reels[id].duration || 1;
+    const want = (index / total) * Math.max(0, duration - 0.05);
+    if (Math.abs(video.currentTime - want) > 0.07) {
+      try {
+        video.currentTime = want;
+      } catch (err) {
+        /* the next scroll tick tries again */
+      }
+      return;
+    }
+    drawVideo(id, video);
   }
 
   // ------------------------------------------------------------- bootloader
@@ -533,11 +620,12 @@
 
   function gatePlan() {
     const pages = [];
-    order.forEach((id, at) => {
-      const total = pageCount(id);
-      const want = at === 0 ? total : Math.min(GATE_REST_PAGES, total);
-      for (let page = 0; page < want; page += 1) pages.push(pageKey(id, page));
-    });
+    // Only the opening reel is frames now; the others are streams that start
+    // filling the moment the gate lifts, so preloading their pages would be
+    // wasted bytes.
+    const first = order[0];
+    const total = pageCount(first);
+    for (let page = 0; page < total; page += 1) pages.push(pageKey(first, page));
     const hero = order[0];
     const crispKeys = [];
     const head = Math.min(12, countOf(hero));
@@ -641,10 +729,13 @@
   // Everything the gate did not wait for: the rest of the pages in order, then
   // the crisp frames of the opening reel.
   function startBackground() {
-    for (const id of order) fillReel(id, 400);
     const hero = order[0];
+    fillReel(hero, 400);
     const total = countOf(hero);
     for (let index = 0; index < Math.min(total, 120); index += 1) manager.want(hero, index, 500 + index);
+    // Everything after the opening reel: one stream each, started now so the
+    // buffer is already deep by the time the visitor reaches it.
+    for (const id of order.slice(1)) videoFor(id);
   }
 
   // --------------------------------------------------------------- plumbing
@@ -720,6 +811,8 @@
         papers: sheets.size,
         shown: Object.fromEntries(shown),
         painted: Object.fromEntries(painted),
+        videos: [...videos.entries()].map(([id, video]) => [id, video.readyState, Number(video.duration || 0).toFixed(1), Number(video.buffered.length ? video.buffered.end(video.buffered.length - 1) : 0).toFixed(1)]),
+        videoBroken: [...videoBroken],
       };
     },
   };
