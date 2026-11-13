@@ -257,6 +257,11 @@
   const manager = new FrameManager(crispUrl, CRISP_BUDGET);
   const motion = new FrameManager(motionUrl, MOTION_BUDGET);
 
+  // The poster of every reel as a decoded image, fetched once at the very
+  // front of the queue. It is the floor the picture can never fall below:
+  // whatever else fails, this is drawn, so a reel is never an empty panel.
+  const stills = new Map();
+
   // ------------------------------------------------------------------ canvas
 
   function surface(id) {
@@ -356,13 +361,25 @@
     const reach = Math.min(limit, distance);
     const crisp = manager.nearest(id, index, reach);
     const found = crisp || motion.nearest(id, index, reach);
-    if (!found) return false;
-    shown.set(id, found.index);
-    const mark = `${crisp ? "c" : "m"}:${found.index}`;
-    if (painted.get(id) === mark) return true;
-    if (!draw(id, found.bitmap)) return false;
-    painted.set(id, mark);
-    return true;
+    if (found) {
+      shown.set(id, found.index);
+      const mark = `${crisp ? "c" : "m"}:${found.index}`;
+      if (painted.get(id) === mark) return true;
+      if (draw(id, found.bitmap)) {
+        painted.set(id, mark);
+        return true;
+      }
+    }
+    const still = stills.get(id);
+    if (still) {
+      const mark = `p:${still.width}x${still.height}`;
+      if (painted.get(id) === mark) return true;
+      if (draw(id, still)) {
+        painted.set(id, mark);
+        return true;
+      }
+    }
+    return false;
   }
 
   // ----------------------------------------------------------------- scrub
@@ -410,23 +427,24 @@
   // ------------------------------------------------------------- bootloader
 
   const BOOT_GATE = 0.5;
+  // Measured on a phone over this host: roughly two and a half frame requests
+  // per second, so a 633-frame gate took five minutes and the overlay sat at
+  // 5%. The gate is now a small, honest set: the first second of the hero in
+  // both tiers, plus the opening frames of every other reel so none of them can
+  // present an empty panel. Everything else streams in behind it.
+  const GATE_HEAD = 12;
+  const GATE_PROBE = 2;
 
-  // The gate is built around the motion tier. Every frame of every reel exists
-  // at 480px and 7.8 KB, so the whole library is ~4.9 MB: cheap enough to fetch
-  // completely before the overlay lifts. From that moment no reel can open on
-  // an empty panel, because every index has a light frame waiting for it, and
-  // the crisp frames stream in behind and take over as they arrive.
   function gateKeys() {
     const motionKeys = [];
     const crispKeys = [];
-    for (const id of order) {
-      const total = countOf(id);
-      for (let index = 0; index < total; index += 1) motionKeys.push(motion.key(id, index));
+    const hero = order[0];
+    const head = Math.min(GATE_HEAD, countOf(hero));
+    for (let index = 0; index < head; index += 1) motionKeys.push(motion.key(hero, index));
+    for (const id of order.slice(1)) {
+      for (let index = 0; index < Math.min(GATE_PROBE, countOf(id)); index += 1) motionKeys.push(motion.key(id, index));
     }
-    // Plus half of the first reel at full resolution, so the opening is crisp
-    // the instant the concierge screen lifts.
-    const hero = countOf(order[0]);
-    for (let index = 0; index < hero; index += 2) crispKeys.push(manager.key(order[0], index));
+    for (let index = 0; index < head; index += 2) crispKeys.push(manager.key(hero, index));
     return { motionKeys, crispKeys };
   }
 
@@ -440,6 +458,18 @@
       if (overlay) overlay.remove();
       ready();
       return;
+    }
+
+    // Posters first: four requests that guarantee every panel can paint.
+    for (const id of order) {
+      fetch(`assets/${id}.jpg?v=1`, { credentials: "same-origin" })
+        .then((response) => (response.ok ? response.blob() : Promise.reject(new Error("poster"))))
+        .then(decode)
+        .then((bitmap) => {
+          stills.set(id, bitmap);
+          scheduleRepaint();
+        })
+        .catch(() => {});
     }
 
     const { motionKeys, crispKeys } = gateKeys();
@@ -517,7 +547,7 @@
       ready();
       startBackground();
       scheduleRepaint();
-    }, 20000);
+    }, 12000);
   }
 
   // Cascade: even then odd frames of the next two reels, then the keyframes of
@@ -541,12 +571,44 @@
     }
   }
 
+  function totalFrames() {
+    let total = 0;
+    for (const id of order) total += countOf(id);
+    return total;
+  }
+
+  // ?debug=1 puts the engine's own state on screen, so a report from a phone
+  // that misbehaves carries the numbers instead of a description.
+  function startDebug() {
+    const panel = document.createElement("pre");
+    panel.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:10000;margin:0;padding:8px 10px;font:11px/1.45 ui-monospace,monospace;color:#9fe8c0;background:rgba(0,0,0,.86);border:1px solid rgba(255,255,255,.18);white-space:pre-wrap;max-width:94vw;pointer-events:none";
+    document.body.appendChild(panel);
+    const errors = [];
+    window.addEventListener("error", (event) => errors.push(String(event.message || "error").slice(0, 80)));
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason = event.reason;
+      errors.push(String((reason && reason.message) || reason || "rejection").slice(0, 80));
+    });
+    setInterval(() => {
+      const state = window.PSMFilm.debug();
+      panel.textContent = [
+        `tier ${state.tier} booted ${window.PSMFilm.booted}`,
+        `motion ${state.motionLoaded}/${totalFrames()} dec ${state.motionDecoded} q ${state.motionQueued}`,
+        `crisp  ${state.loaded} dec ${state.decoded} q ${state.queued} act ${state.active}`,
+        `keep ${state.keep.join(",")}`,
+        `paint ${JSON.stringify(state.painted)}`,
+        errors.length ? `err ${errors.slice(-2).join(" | ")}` : "err none",
+      ].join("\n");
+    }, 600);
+  }
+
   function init(config) {
     reels = config.reels || {};
     order = Object.keys(reels);
     manager.focus("shot-1", 0);
     window.PSMFilm.reels = reels;
     boot(config.ready || (() => {}));
+    if (/[?&]debug=1/.test(location.search)) startDebug();
   }
 
   window.PSMFilm = {
@@ -572,6 +634,7 @@
         keep: [...manager.keep],
         shown: Object.fromEntries(shown),
         painted: Object.fromEntries(painted),
+        stills: stills.size,
       };
     },
   };
