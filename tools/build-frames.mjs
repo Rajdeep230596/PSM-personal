@@ -43,6 +43,13 @@ for (const tier of TIERS) {
     const count = readdirSync(from).filter((name) => name.endsWith(".jpg")).length;
     if (!count) throw new Error(`no frames in ${from}`);
     mkdirSync(to, { recursive: true });
+    // Tiers are expensive to encode and rarely change; rebuild only the ones
+    // that are incomplete.
+    const already = existsSync(to) ? readdirSync(to).filter((name) => name.endsWith(".webp")).length : 0;
+    if (already === count) {
+      console.log(`${tier.dir}/${reel}: up to date (${count})`);
+      continue;
+    }
     execFileSync(
       "ffmpeg",
       [
@@ -62,9 +69,50 @@ for (const tier of TIERS) {
 }
 
 const masters = JSON.parse(readFileSync(join(ROOT, "manifest.json"), "utf8"));
+
+// Sprite sheets. A phone on this host manages about two and a half frame
+// requests a second, so 633 separate motion frames is a four minute wait while
+// 16 frames to a sheet is 40 requests for the same coverage. Each sheet is a
+// 4x4 grid of 480x270 cells, packed losslessly from the motion encodes.
+const SHEET_CELLS = 16;
+const SHEET_COLS = 4;
+const SHEET_CELL_W = 480;
+const SHEET_CELL_H = 270;
+const sheetIndex = {};
+
+for (const reel of REELS) {
+  const from = join(ROOT, "motion", reel);
+  const to = join(ROOT, "sheet", reel);
+  if (!existsSync(from)) throw new Error(`missing motion reel ${from}`);
+  mkdirSync(to, { recursive: true });
+  const count = readdirSync(from).filter((name) => name.endsWith(".webp")).length;
+  const pages = Math.ceil(count / SHEET_CELLS);
+  for (let page = 0; page < pages; page += 1) {
+    const first = page * SHEET_CELLS;
+    // tile pads the final page with black when the reel does not divide evenly;
+    // those cells are never addressed.
+    execFileSync(
+      "ffmpeg",
+      [
+        "-v", "error", "-y",
+        "-f", "image2", "-start_number", String(first), "-i", join(from, "%03d.webp"),
+        "-vf", `tile=${SHEET_COLS}x${SHEET_CELLS / SHEET_COLS}`,
+        "-frames:v", "1",
+        "-c:v", "libwebp", "-quality", "82", "-compression_level", "6",
+        "-pix_fmt", "yuv420p",
+        join(to, `${String(page).padStart(2, "0")}.webp`),
+      ],
+      { stdio: "inherit" }
+    );
+  }
+  sheetIndex[reel] = { pages, cells: SHEET_CELLS, cols: SHEET_COLS, cellW: SHEET_CELL_W, cellH: SHEET_CELL_H };
+  console.log(`sheet/${reel}: ${pages} pages for ${count} frames`);
+}
+
 for (const reel of REELS) manifest[reel] = masters[reel];
 manifest.tiers = TIERS.map((tier) => tier.dir);
 manifest.motion = "motion";
+manifest.sheet = sheetIndex;
 writeFileSync(join(ROOT, "manifest.json"), `${JSON.stringify(manifest)}\n`);
 
 // main.js carries the same table inline so the first frame never waits on a

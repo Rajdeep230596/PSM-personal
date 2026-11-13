@@ -1,51 +1,56 @@
 /* Progressive Stride Frame Engine
  *
- * One manager owns every film frame: it fetches through a hard concurrency
- * limit, decodes off the main thread with createImageBitmap, keeps only the
- * reels around the playhead in memory and paints the nearest decoded frame
- * into a canvas. The <img> underneath stays as the poster, so a panel is never
- * blank even before a single frame has arrived.
+ * Two sources, one picture:
+ *   crisp  one WebP per frame, full resolution, drawn when the scroll settles
+ *   sheets 16 frames packed into one 480px sprite page, drawn while scrolling
+ *
+ * One page request covers 16 frames, which is the whole point: this host serves
+ * about two and a half frame requests a second, so 633 separate motion frames
+ * is a four minute wait while 40 pages is seconds.
+ *
+ * The poster of each reel is decoded first and drawn whenever neither source
+ * has a frame, so no panel can ever be empty.
  */
 (() => {
   const CONCURRENCY = 6;
-  const DPR_CAP = 2;
-  // Frames kept decoded at once. A 1080 frame is 1080x608x4 = 2.6 MB of GPU
-  // memory, so this is the difference between 60 MB and a dead tab.
   const TIER = window.__psmTier || "1280";
-  // Decoded budgets. A crisp 1080 frame is 1080x608x4 = 2.6 MB and a motion
-  // frame is 480x270x4 = 0.5 MB, so these two caps together are what keeps the
-  // tab inside a phone's memory.
+  const ASSET_VERSION = "v=5";
+  // Decoded budgets. A crisp 1080 frame is 2.6 MB, a sheet page is 480*270*16
+  // pixels = 8.3 MB, so both are capped hard.
   const CRISP_BUDGET = TIER === "1280" ? 30 : TIER === "1080" ? 32 : 72;
-  const MOTION_BUDGET = 64;
-  const ASSET_VERSION = "v=4";
-  // Radius of the window kept warm around the playhead while scrolling.
+  const SHEET_CELLS = 16;
+  const SHEET_COLS = 4;
+  const SHEET_W = 480;
+  const SHEET_H = 270;
+  const SHEET_KEEP = 5;
+  const SHEET_SLOTS = 4;
   const RUNWAY_AHEAD = 24;
   const RUNWAY_BEHIND = 10;
-  // The anti-freeze rule: never travel more than this many frames to find
-  // something to draw, unless the scroll itself has already gone further.
   const SHOW_GAP = 20;
 
   let reels = {};
   let order = [];
   const canvases = new Map();
-  const posters = new Map();
-  const shown = new Map();
+  const fits = new Map();
+  const stills = new Map();
   const painted = new Map();
+  const shown = new Map();
 
   function crispUrl(id, index) {
     return `assets/frames/${TIER}/${id}/${String(index).padStart(3, "0")}.webp?${ASSET_VERSION}`;
   }
 
-  // 480px WebP at 7.8 KB a frame: a whole reel is 1.2 MB, which is what makes
-  // the scroll itself smooth. The crisp frame of the same index replaces it the
-  // moment it is decoded.
-  function motionUrl(id, index) {
-    return `assets/frames/motion/${id}/${String(index).padStart(3, "0")}.webp?${ASSET_VERSION}`;
+  function sheetUrl(id, page) {
+    return `assets/frames/sheet/${id}/${String(page).padStart(2, "0")}.webp?${ASSET_VERSION}`;
   }
 
   function countOf(id) {
     const reel = reels[id];
     return reel ? reel.count : 0;
+  }
+
+  function pageCount(id) {
+    return Math.ceil(countOf(id) / SHEET_CELLS);
   }
 
   function release(bitmap) {
@@ -75,34 +80,26 @@
     });
   }
 
+  // ------------------------------------------------------------- crisp frames
+
   class FrameManager {
-    constructor(build, budget) {
-      this.build = build;
+    constructor(budget) {
       this.budget = budget;
       this.bitmaps = new Map();
       this.queued = new Map();
       this.queue = [];
       this.active = 0;
       this.failed = new Set();
+      this.loaded = new Set();
       this.keep = new Set();
       this.playhead = { reel: "", index: 0 };
       this.listeners = new Set();
       this.seq = 0;
-      this.paused = false;
       this.booted = false;
-      // Every frame that has ever been fetched. Eviction takes the bitmap, not
-      // this record: the gate can finish without holding a reel in memory.
-      this.loaded = new Set();
     }
 
     get size() {
       return this.bitmaps.size;
-    }
-
-    get count() {
-      let total = 0;
-      for (const id of order) total += countOf(id);
-      return total;
     }
 
     key(id, index) {
@@ -115,7 +112,6 @@
     }
 
     want(id, index, priority = 60) {
-      if (this.paused) return;
       if (index < 0 || index >= countOf(id)) return;
       const key = this.key(id, index);
       if (this.bitmaps.has(key) || this.failed.has(key)) return;
@@ -134,7 +130,7 @@
       if (this.queue.length > 1) {
         this.queue.sort((a, b) => a.priority - b.priority || a.seq - b.seq);
       }
-      while (!this.paused && this.active < CONCURRENCY && this.queue.length) {
+      while (this.active < CONCURRENCY - SHEET_SLOTS && this.queue.length) {
         const job = this.queue.shift();
         this.queued.delete(job.key);
         this.active += 1;
@@ -148,7 +144,7 @@
         this.emit();
         this.pump();
       };
-      fetch(this.build(job.id, job.index), { credentials: "same-origin" })
+      fetch(crispUrl(job.id, job.index), { credentials: "same-origin" })
         .then((response) => {
           if (!response.ok) throw new Error(`frame ${response.status}`);
           return response.blob();
@@ -172,9 +168,6 @@
         });
     }
 
-    // Only the active reel and its two neighbours stay decoded. Anything
-    // further away is closed here and re-fetched from the browser's disk cache
-    // if the visitor scrolls back.
     focus(id, index) {
       this.playhead = { reel: id, index };
       if (!this.booted) {
@@ -186,10 +179,6 @@
       for (const step of [-1, 0, 1]) {
         const near = order[at + step];
         if (near) keep.add(near);
-      }
-      if (keep.size === this.keep.size && [...keep].every((item) => this.keep.has(item))) {
-        this.evict();
-        return;
       }
       this.keep = keep;
       this.evict();
@@ -254,15 +243,100 @@
     }
   }
 
-  const manager = new FrameManager(crispUrl, CRISP_BUDGET);
-  const motion = new FrameManager(motionUrl, MOTION_BUDGET);
+  const manager = new FrameManager(CRISP_BUDGET);
 
-  // The poster of every reel as a decoded image, fetched once at the very
-  // front of the queue. It is the floor the picture can never fall below:
-  // whatever else fails, this is drawn, so a reel is never an empty panel.
-  const stills = new Map();
+  // ------------------------------------------------------------ sheet pages
 
-  // ------------------------------------------------------------------ canvas
+  const sheets = new Map(); // "reel/page" -> ImageBitmap
+  const pageQueued = new Map(); // url -> job
+  const pageQueue = [];
+  const pageDone = new Set();
+  const pageFailed = new Set();
+  let pageActive = 0;
+  let pageSeq = 0;
+  const pageListeners = new Set();
+
+  function pageKey(id, page) {
+    return `${id}/${page}`;
+  }
+
+  function wantPage(id, page, priority = 50) {
+    const total = pageCount(id);
+    if (page < 0 || page >= total) return;
+    const key = pageKey(id, page);
+    if (pageDone.has(key) || pageFailed.has(key) || sheets.has(key)) return;
+    const waiting = pageQueued.get(key);
+    if (waiting) {
+      if (priority < waiting.priority) waiting.priority = priority;
+      return;
+    }
+    const job = { key, id, page, priority, seq: pageSeq++ };
+    pageQueued.set(key, job);
+    pageQueue.push(job);
+    pumpPages();
+  }
+
+  function pumpPages() {
+    if (pageQueue.length > 1) {
+      pageQueue.sort((a, b) => a.priority - b.priority || a.seq - b.seq);
+    }
+    while (pageActive < SHEET_SLOTS && pageQueue.length) {
+      const job = pageQueue.shift();
+      pageQueued.delete(job.key);
+      pageActive += 1;
+      loadPage(job);
+    }
+  }
+
+  function loadPage(job) {
+    const done = () => {
+      pageActive -= 1;
+      for (const listener of pageListeners) listener(job);
+      scheduleRepaint();
+      pumpPages();
+    };
+    fetch(sheetUrl(job.id, job.page), { credentials: "same-origin" })
+      .then((response) => {
+        if (!response.ok) throw new Error(`page ${response.status}`);
+        return response.blob();
+      })
+      .then(decode)
+      .then((bitmap) => {
+        pageDone.add(job.key);
+        sheets.set(job.key, bitmap);
+        trimSheets(job.id, job.page);
+        done();
+      })
+      .catch(() => {
+        pageFailed.add(job.key);
+        done();
+      });
+  }
+
+  // Keep the pages around the playhead, close the rest.
+  function trimSheets(id, page) {
+    if (sheets.size <= SHEET_KEEP) return;
+    const scored = [];
+    for (const [key, bitmap] of sheets) {
+      const cut = key.lastIndexOf("/");
+      const reelId = key.slice(0, cut);
+      const pageIndex = Number(key.slice(cut + 1));
+      const distance = reelId === id ? Math.abs(pageIndex - page) : 1000;
+      scored.push({ key, bitmap, distance });
+    }
+    scored.sort((a, b) => b.distance - a.distance);
+    for (let i = 0; i < scored.length && sheets.size > SHEET_KEEP; i += 1) {
+      release(scored[i].bitmap);
+      sheets.delete(scored[i].key);
+    }
+  }
+
+  function onPage(listener) {
+    pageListeners.add(listener);
+    return () => pageListeners.delete(listener);
+  }
+
+  // ----------------------------------------------------------------- canvas
 
   function surface(id) {
     if (canvases.has(id)) return canvases.get(id);
@@ -272,30 +346,32 @@
   }
 
   function fitOf(id) {
-    if (posters.has(id)) return posters.get(id);
+    if (fits.has(id)) return fits.get(id);
     const picture = document.querySelector(`#${id} img.shot-video`);
     if (!picture) return "cover";
     const fit = getComputedStyle(picture).objectFit || "cover";
-    posters.set(id, fit);
+    fits.set(id, fit);
     return fit;
   }
 
-  function draw(id, bitmap) {
+  // Draws a bitmap, or a cell of a sheet, into the reel's canvas with the same
+  // framing the poster uses (cover or contain, centred).
+  function draw(id, bitmap, sx, sy, sw, sh) {
     const canvas = surface(id);
     if (!canvas || !bitmap) return false;
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     if (width < 2 || height < 2) return false;
-    const scale = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
     const targetW = Math.round(width * scale);
     const targetH = Math.round(height * scale);
     if (canvas.width !== targetW || canvas.height !== targetH) {
       canvas.width = targetW;
       canvas.height = targetH;
     }
-    const source = bitmap.width ? bitmap : null;
-    const sourceW = source ? source.width : targetW;
-    const sourceH = source ? source.height : targetH;
+    const hasRect = typeof sw === "number" && sw > 0;
+    const sourceW = hasRect ? sw : bitmap.width;
+    const sourceH = hasRect ? sh : bitmap.height;
     if (!sourceW || !sourceH) return false;
     const contain = fitOf(id) === "contain";
     const ratio = contain
@@ -303,19 +379,16 @@
       : Math.max(targetW / sourceW, targetH / sourceH);
     const drawW = sourceW * ratio;
     const drawH = sourceH * ratio;
-    // alpha: true matters. iOS discards the backing store of canvases that
-    // have been offscreen for a while; an opaque canvas comes back as a solid
-    // black rectangle, while a transparent one simply falls through to the
-    // poster beneath it.
     const context = canvas.getContext("2d", { alpha: true });
     if (!context) return false;
-    context.drawImage(bitmap, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
+    if (hasRect) {
+      context.drawImage(bitmap, sx, sy, sourceW, sourceH, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
+    } else {
+      context.drawImage(bitmap, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
+    }
     return true;
   }
 
-  // A frame landing is the other half of the anti-freeze rule: if the picture
-  // was waiting for something near the playhead, it must appear the moment it
-  // arrives rather than waiting for the visitor to move again.
   let repaintQueued = false;
   function scheduleRepaint() {
     if (repaintQueued) return;
@@ -329,44 +402,54 @@
       if (!reel || !manager.booted) return;
       paint(reel, index, SHOW_GAP + 40);
     };
-    // rAF coalesces a batch of arrivals into one paint, but it does not run in
-    // a background tab and can stall on a busy phone. The timer is the guard.
     requestAnimationFrame(run);
     setTimeout(run, 120);
   }
 
-  // iOS throws away canvas contents when the page is backgrounded or memory
-  // tightens, and a resize reallocates them. Forget what was on screen and
-  // redraw the playhead, otherwise the canvas stays empty until the next scroll.
-  function refresh() {
-    shown.clear();
-    painted.clear();
-    scheduleRepaint();
+  function drawSheetCell(id, bitmap, index, cell) {
+    const col = cell % SHEET_COLS;
+    const row = Math.floor(cell / SHEET_COLS);
+    return draw(id, bitmap, col * SHEET_W, row * SHEET_H, SHEET_W, SHEET_H);
   }
 
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) refresh();
-  });
-  window.addEventListener("pageshow", refresh);
-  window.addEventListener("orientationchange", refresh);
-  window.addEventListener("resize", refresh);
-
-  // Two tiers, one decision: the crisp frame if one is decoded near the
-  // playhead, otherwise the motion frame, which is a fifth of the bytes and is
-  // there for exactly this moment. A crisp frame that arrives later replaces
-  // the motion one at the same index.
   function paint(id, index, distance) {
     const previous = Number.isFinite(shown.get(id)) ? shown.get(id) : null;
     const limit = previous === null ? SHOW_GAP : Math.max(SHOW_GAP, Math.abs(index - previous));
     const reach = Math.min(limit, distance);
     const crisp = manager.nearest(id, index, reach);
-    const found = crisp || motion.nearest(id, index, reach);
-    if (found) {
-      shown.set(id, found.index);
-      const mark = `${crisp ? "c" : "m"}:${found.index}`;
-      if (painted.get(id) === mark) return true;
-      if (draw(id, found.bitmap)) {
+    if (crisp) {
+      shown.set(id, crisp.index);
+      const mark = `c:${crisp.index}`;
+      if (painted.get(id) !== mark && draw(id, crisp.bitmap)) {
         painted.set(id, mark);
+        return true;
+      }
+      if (painted.get(id) === mark) return true;
+    }
+    const page = Math.floor(index / SHEET_CELLS);
+    let bitmap = sheets.get(pageKey(id, page));
+    let cell = index % SHEET_CELLS;
+    if (!bitmap) {
+      // Nearest decoded page on this reel, so the film still steps while the
+      // page under the playhead is still downloading.
+      let best = -1;
+      for (const key of sheets.keys()) {
+        if (!key.startsWith(`${id}/`)) continue;
+        const pageIndex = Number(key.slice(key.lastIndexOf("/") + 1));
+        if (best < 0 || Math.abs(pageIndex - page) < Math.abs(best - page)) best = pageIndex;
+      }
+      if (best >= 0) {
+        bitmap = sheets.get(pageKey(id, best));
+        const within = index - best * SHEET_CELLS;
+        cell = Math.min(Math.max(within, 0), SHEET_CELLS - 1);
+      }
+    }
+    if (bitmap) {
+      const mark = `s:${page}:${cell}`;
+      if (painted.get(id) === mark) return true;
+      if (drawSheetCell(id, bitmap, index, cell)) {
+        painted.set(id, mark);
+        shown.set(id, index);
         return true;
       }
     }
@@ -382,70 +465,81 @@
     return false;
   }
 
-  // ----------------------------------------------------------------- scrub
+  // ------------------------------------------------------------------ scrub
+
+  let activeReel = "";
 
   function scrub(id, index) {
     manager.focus(id, index);
-    motion.focus(id, index);
     const total = countOf(id);
+    const page = Math.floor(index / SHEET_CELLS);
+    // Never scroll onto a frame whose page has not been asked for.
+    wantPage(id, page, 6);
+    wantPage(id, page + 1, 9);
+    wantPage(id, page - 1, 9);
     const previous = Number.isFinite(shown.get(id)) ? shown.get(id) : index;
     const forward = index >= previous;
     for (let step = 0; step <= (forward ? RUNWAY_AHEAD : RUNWAY_BEHIND); step += 1) {
       const ahead = forward ? index + step : index - step;
       const behind = forward ? index - step : index + step;
-      if (ahead >= 0 && ahead < total) {
-        motion.want(id, ahead, 8 + step);
-        manager.want(id, ahead, 10 + step);
-      }
-      if (step && behind >= 0 && behind < total) {
-        motion.want(id, behind, 16 + step);
-        manager.want(id, behind, 20 + step);
-      }
+      if (ahead >= 0 && ahead < total) manager.want(id, ahead, 10 + step);
+      if (step && behind >= 0 && behind < total) manager.want(id, behind, 20 + step);
+    }
+    // Crossing into a reel pulls the next one in fully, as asked: at reel 2 the
+    // third reel completes, at reel 3 the fourth does.
+    if (id !== activeReel) {
+      activeReel = id;
+      const next = order[order.indexOf(id) + 1];
+      if (next) fillReel(next, 14);
     }
     paint(id, index, SHOW_GAP + 40);
   }
 
+  function fillReel(id, priority = 40) {
+    const pages = pageCount(id);
+    for (let page = 0; page < pages; page += 1) wantPage(id, page, priority);
+  }
+
   function still(id) {
     manager.focus(id, 0);
-    motion.focus(id, 0);
     manager.want(id, 0, 1);
-    motion.want(id, 0, 2);
+    wantPage(id, 0, 1);
     paint(id, 0, 60);
   }
 
   function prewarm(id) {
-    const at = order.indexOf(id);
-    const next = order[at + 1];
-    if (!next) return;
-    const total = Math.min(24, countOf(next));
-    for (let index = 0; index < total; index += 1) {
-      motion.want(next, index, 26 + index);
-      manager.want(next, index, 30 + index);
-    }
+    const next = order[order.indexOf(id) + 1];
+    if (next) fillReel(next, 30);
   }
 
   // ------------------------------------------------------------- bootloader
 
-  const BOOT_GATE = 0.5;
-  // Measured on a phone over this host: roughly two and a half frame requests
-  // per second, so a 633-frame gate took five minutes and the overlay sat at
-  // 5%. The gate is now a small, honest set: the first second of the hero in
-  // both tiers, plus the opening frames of every other reel so none of them can
-  // present an empty panel. Everything else streams in behind it.
-  const GATE_HEAD = 12;
-  const GATE_PROBE = 2;
+  // The plan the concierge screen waits on: close to the whole first film and
+  // most of the others, expressed in pages rather than frames.
+  const GATE_FIRST = 0.9;
+  const GATE_REST = 0.8;
 
-  function gateKeys() {
-    const motionKeys = [];
-    const crispKeys = [];
+  function gatePlan() {
+    const pages = [];
+    order.forEach((id, at) => {
+      const total = pageCount(id);
+      const want = Math.ceil(total * (at === 0 ? GATE_FIRST : GATE_REST));
+      for (let page = 0; page < want; page += 1) pages.push(pageKey(id, page));
+    });
     const hero = order[0];
-    const head = Math.min(GATE_HEAD, countOf(hero));
-    for (let index = 0; index < head; index += 1) motionKeys.push(motion.key(hero, index));
-    for (const id of order.slice(1)) {
-      for (let index = 0; index < Math.min(GATE_PROBE, countOf(id)); index += 1) motionKeys.push(motion.key(id, index));
-    }
+    const crispKeys = [];
+    const head = Math.min(12, countOf(hero));
     for (let index = 0; index < head; index += 2) crispKeys.push(manager.key(hero, index));
-    return { motionKeys, crispKeys };
+    return { pages, crispKeys };
+  }
+
+  function pageProgress(keys) {
+    if (!keys.length) return 1;
+    let done = 0;
+    for (const key of keys) {
+      if (pageDone.has(key) || pageFailed.has(key)) done += 1;
+    }
+    return done / keys.length;
   }
 
   function boot(ready) {
@@ -454,7 +548,7 @@
     const percent = document.getElementById("boot-percent");
     const root = document.documentElement;
 
-    if (!reels["shot-1"] || !countOf("shot-1")) {
+    if (!reels[order[0]] || !countOf(order[0])) {
       if (overlay) overlay.remove();
       ready();
       return;
@@ -472,113 +566,96 @@
         .catch(() => {});
     }
 
-    const { motionKeys, crispKeys } = gateKeys();
-    // Every reel may be decoded during the gate; the budgets still trim the
-    // decode caches, but the fetched record is what the gate counts, so a
-    // dropped bitmap never reopens the gate.
+    const { pages, crispKeys } = gatePlan();
     manager.keep = new Set(order);
-    motion.keep = new Set(order);
     manager.focus(order[0], 0);
-    motion.focus(order[0], 0);
-    const queueKeys = (target, keys, base) => {
-      for (const key of keys) {
-        const cut = key.lastIndexOf("/");
-        target.want(key.slice(0, cut), Number(key.slice(cut + 1)), base);
-      }
-    };
-    // Motion first: it is what makes the first scroll smooth, and it is a fifth
-    // of the bytes of the same number of crisp frames.
-    queueKeys(motion, motionKeys, 1);
-    queueKeys(manager, crispKeys, 30);
+    for (const key of pages) {
+      const cut = key.lastIndexOf("/");
+      wantPage(key.slice(0, cut), Number(key.slice(cut + 1)), 1);
+    }
+    for (const key of crispKeys) {
+      const cut = key.lastIndexOf("/");
+      manager.want(key.slice(0, cut), Number(key.slice(cut + 1)), 30);
+    }
 
     if (overlay) {
       overlay.hidden = false;
       root.classList.add("is-booting");
     }
 
+    const close = () => {
+      manager.booted = true;
+      offPages();
+      offCrisp();
+      root.classList.remove("is-booting");
+      if (overlay) {
+        overlay.classList.add("is-done");
+        setTimeout(() => {
+          overlay.hidden = true;
+          overlay.remove();
+        }, 900);
+      }
+      ready();
+      scheduleRepaint();
+    };
+
     let opened = false;
     const finish = () => {
       if (opened) return;
-      const light = motion.progress(motionKeys);
-      const crisp = manager.progress(crispKeys);
-      const weight = motionKeys.length + crispKeys.length;
-      const overall = (light * motionKeys.length + crisp * crispKeys.length) / Math.max(1, weight);
+      const pageShare = pageProgress(pages);
+      const crispShare = manager.progress(crispKeys);
+      const overall = (pageShare * pages.length + crispShare * crispKeys.length) / Math.max(1, pages.length + crispKeys.length);
       const shownPercent = Math.round(overall * 100);
       if (bar) bar.style.width = `${shownPercent}%`;
       if (percent) percent.textContent = `${shownPercent}%`;
-      if (light < 1 || crisp < BOOT_GATE) return;
+      if (pageShare < 1 || crispShare < 0.5) return;
       opened = true;
-      manager.booted = true;
-      unsubscribe();
-      root.classList.remove("is-booting");
-      if (overlay) {
-        overlay.classList.add("is-done");
-        setTimeout(() => {
-          overlay.hidden = true;
-          overlay.remove();
-        }, 900);
-      }
-      ready();
+      close();
       startBackground();
-      scheduleRepaint();
     };
 
-    const unsubscribe = () => {
-      offCrisp();
-      offMotion();
-    };
+    const offPages = onPage(finish);
     const offCrisp = manager.onChange(finish);
-    const offMotion = motion.onChange(finish);
     finish();
-    // Never trap the visitor behind a stalled network.
+    // Never trap the visitor behind a slow network.
     setTimeout(() => {
       if (opened) return;
       opened = true;
-      manager.booted = true;
-      unsubscribe();
-      root.classList.remove("is-booting");
-      if (overlay) {
-        overlay.classList.add("is-done");
-        setTimeout(() => {
-          overlay.hidden = true;
-          overlay.remove();
-        }, 900);
-      }
-      ready();
+      close();
       startBackground();
-      scheduleRepaint();
-    }, 12000);
+    }, 15000);
   }
 
-  // Cascade: even then odd frames of the next two reels, then the keyframes of
-  // everything after them. Those later reels are filled on approach, not on
-  // load, so a long visit does not silently download the whole library.
+  // Everything the gate did not wait for: the rest of the pages in order, then
+  // the crisp frames of the opening reel.
   function startBackground() {
-    const plan = [];
-    // The odd frames the gate skipped, reel by reel, so every reel is complete
-    // before the visitor reaches the last one. Frames the gate already fetched
-    // are left alone: they are on disk and re-hydrate when their reel is near.
-    for (const id of order) {
-      const total = countOf(id);
-      for (let index = 1; index < total; index += 2) plan.push([id, index]);
-      for (let index = 2; index < total; index += 2) plan.push([id, index]);
-    }
-    let priority = 400;
-    for (const [id, index] of plan) {
-      if (manager.loaded.has(manager.key(id, index))) continue;
-      manager.want(id, index, priority);
-      priority += 0.001;
-    }
+    for (const id of order) fillReel(id, 400);
+    const hero = order[0];
+    const total = countOf(hero);
+    for (let index = 0; index < Math.min(total, 120); index += 1) manager.want(hero, index, 500 + index);
   }
 
-  function totalFrames() {
+  // --------------------------------------------------------------- plumbing
+
+  function refresh() {
+    shown.clear();
+    painted.clear();
+    scheduleRepaint();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refresh();
+  });
+  window.addEventListener("pageshow", refresh);
+  window.addEventListener("orientationchange", refresh);
+  window.addEventListener("resize", refresh);
+
+  function totalPages() {
     let total = 0;
-    for (const id of order) total += countOf(id);
+    for (const id of order) total += pageCount(id);
     return total;
   }
 
-  // ?debug=1 puts the engine's own state on screen, so a report from a phone
-  // that misbehaves carries the numbers instead of a description.
   function startDebug() {
     const panel = document.createElement("pre");
     panel.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:10000;margin:0;padding:8px 10px;font:11px/1.45 ui-monospace,monospace;color:#9fe8c0;background:rgba(0,0,0,.86);border:1px solid rgba(255,255,255,.18);white-space:pre-wrap;max-width:94vw;pointer-events:none";
@@ -593,9 +670,8 @@
       const state = window.PSMFilm.debug();
       panel.textContent = [
         `tier ${state.tier} booted ${window.PSMFilm.booted}`,
-        `motion ${state.motionLoaded}/${totalFrames()} dec ${state.motionDecoded} q ${state.motionQueued}`,
-        `crisp  ${state.loaded} dec ${state.decoded} q ${state.queued} act ${state.active}`,
-        `keep ${state.keep.join(",")}`,
+        `pages ${pageDone.size}/${totalPages()} dec ${sheets.size} q ${pageQueue.length} act ${pageActive}`,
+        `crisp ${state.loaded} dec ${state.decoded} q ${state.queued}`,
         `paint ${JSON.stringify(state.painted)}`,
         errors.length ? `err ${errors.slice(-2).join(" | ")}` : "err none",
       ].join("\n");
@@ -605,7 +681,7 @@
   function init(config) {
     reels = config.reels || {};
     order = Object.keys(reels);
-    manager.focus("shot-1", 0);
+    manager.focus(order[0] || "shot-1", 0);
     window.PSMFilm.reels = reels;
     boot(config.ready || (() => {}));
     if (/[?&]debug=1/.test(location.search)) startDebug();
@@ -618,23 +694,20 @@
     prewarm,
     manager,
     get booted() {
-      return !document.documentElement.classList.contains("is-booting");
+      return manager.booted;
     },
     debug() {
       return {
         tier: TIER,
         budget: CRISP_BUDGET,
-        active: manager.active,
-        queued: manager.queue.length,
         decoded: manager.bitmaps.size,
-        motionDecoded: motion.bitmaps.size,
-        motionQueued: motion.queue.length,
+        queued: manager.queue.length,
+        active: manager.active,
         loaded: manager.loaded.size,
-        motionLoaded: motion.loaded.size,
-        keep: [...manager.keep],
+        stills: stills.size,
+        papers: sheets.size,
         shown: Object.fromEntries(shown),
         painted: Object.fromEntries(painted),
-        stills: stills.size,
       };
     },
   };
