@@ -76,8 +76,8 @@ const masters = JSON.parse(readFileSync(join(ROOT, "manifest.json"), "utf8"));
 // 4x4 grid of 480x270 cells, packed losslessly from the motion encodes.
 const SHEET_CELLS = 16;
 const SHEET_COLS = 4;
-const SHEET_CELL_W = 480;
-const SHEET_CELL_H = 270;
+const SHEET_CELL_W = 320;
+const SHEET_CELL_H = 180;
 const sheetIndex = {};
 
 for (const reel of REELS) {
@@ -96,9 +96,9 @@ for (const reel of REELS) {
       [
         "-v", "error", "-y",
         "-f", "image2", "-start_number", String(first), "-i", join(from, "%03d.webp"),
-        "-vf", `tile=${SHEET_COLS}x${SHEET_CELLS / SHEET_COLS}`,
+        "-vf", `scale=${SHEET_CELL_W}:${SHEET_CELL_H}:flags=lanczos,tile=${SHEET_COLS}x${SHEET_CELLS / SHEET_COLS}`,
         "-frames:v", "1",
-        "-c:v", "libwebp", "-quality", "82", "-compression_level", "6",
+        "-c:v", "libwebp", "-quality", "68", "-compression_level", "6",
         "-pix_fmt", "yuv420p",
         join(to, `${String(page).padStart(2, "0")}.webp`),
       ],

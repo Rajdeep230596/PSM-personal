@@ -12,7 +12,9 @@
  * has a frame, so no panel can ever be empty.
  */
 (() => {
-  const CONCURRENCY = 6;
+  // Four slots for crisp frames and four for sheet pages: eight in flight over
+  // HTTP/2, which is what the host will actually service.
+  const CONCURRENCY = 8;
   const TIER = window.__psmTier || "1280";
   const ASSET_VERSION = "v=5";
   // Decoded budgets. A crisp 1080 frame is 2.6 MB, a sheet page is 480*270*16
@@ -20,8 +22,11 @@
   const CRISP_BUDGET = TIER === "1280" ? 30 : TIER === "1080" ? 32 : 72;
   const SHEET_CELLS = 16;
   const SHEET_COLS = 4;
-  const SHEET_W = 480;
-  const SHEET_H = 270;
+  // 320x180 cells: a whole page is 62 KB, so the gate's 34 pages are ~2 MB.
+  // The scroll is carried at this size and the crisp frame takes over the
+  // moment the reel settles, which is where the sharpness actually matters.
+  const SHEET_W = 320;
+  const SHEET_H = 180;
   const SHEET_KEEP = 5;
   const SHEET_SLOTS = 4;
   const RUNWAY_AHEAD = 24;
