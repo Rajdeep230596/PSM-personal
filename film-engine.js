@@ -75,6 +75,9 @@
       this.seq = 0;
       this.paused = false;
       this.booted = false;
+      // Every frame that has ever been fetched. Eviction takes the bitmap, not
+      // this record: the gate can finish without holding a reel in memory.
+      this.loaded = new Set();
     }
 
     get count() {
@@ -133,6 +136,7 @@
         })
         .then(decode)
         .then((bitmap) => {
+          this.loaded.add(job.key);
           if (!this.keep.has(job.id)) {
             release(bitmap);
             done();
@@ -225,7 +229,7 @@
       if (!keys.length) return 1;
       let done = 0;
       for (const key of keys) {
-        if (this.bitmaps.has(key) || this.failed.has(key)) done += 1;
+        if (this.loaded.has(key) || this.failed.has(key)) done += 1;
       }
       return done / keys.length;
     }
@@ -274,7 +278,11 @@
       : Math.max(targetW / sourceW, targetH / sourceH);
     const drawW = sourceW * ratio;
     const drawH = sourceH * ratio;
-    const context = canvas.getContext("2d", { alpha: false });
+    // alpha: true matters. iOS discards the backing store of canvases that
+    // have been offscreen for a while; an opaque canvas comes back as a solid
+    // black rectangle, while a transparent one simply falls through to the
+    // poster beneath it.
+    const context = canvas.getContext("2d", { alpha: true });
     if (!context) return false;
     context.drawImage(bitmap, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
     return true;
@@ -302,6 +310,21 @@
     setTimeout(run, 120);
   }
 
+  // iOS throws away canvas contents when the page is backgrounded or memory
+  // tightens, and a resize reallocates them. Forget what was on screen and
+  // redraw the playhead, otherwise the canvas stays empty until the next scroll.
+  function refresh() {
+    shown.clear();
+    scheduleRepaint();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refresh();
+  });
+  window.addEventListener("pageshow", refresh);
+  window.addEventListener("orientationchange", refresh);
+  window.addEventListener("resize", refresh);
+
   function paint(id, index, distance) {
     const limit = Number.isFinite(shown.get(id)) ? Math.max(SHOW_GAP, Math.abs(index - shown.get(id))) : SHOW_GAP;
     const found = manager.nearest(id, index, Math.min(limit, distance));
@@ -309,8 +332,6 @@
     if (shown.get(id) === found.index) return true;
     if (!draw(id, found.bitmap)) return false;
     shown.set(id, found.index);
-    const picture = document.querySelector(`#${id} img.shot-video`);
-    if (picture) picture.dataset.covered = "1";
     return true;
   }
 
@@ -347,24 +368,26 @@
   // ------------------------------------------------------------- bootloader
 
   const BOOT_GATE = 0.5;
-  // Priority 0: the first four seconds of the hero at full density, then every
-  // fourth frame of the rest of it, so the reel is covered end to end without
-  // holding the visitor for all 160 frames.
-  const HERO_DENSE = 40;
-  const HERO_STRIDE = 4;
+  // Half of every reel before the gate opens: every second frame of shot-1..N.
+  // That is the coverage the scrubber needs to step through a whole reel, so no
+  // reel opens on an empty panel even if the visitor flicks straight past one.
+  // The frames behind the gate are cached, not held: memory stays at BUDGET and
+  // a reel re-hydrates from disk in milliseconds when it comes into reach.
+  const GATE_STRIDE = 2;
+  // The very first screen of the hero, at full density, so the opening is
+  // perfect the instant the overlay lifts.
+  const HERO_FIRST = 24;
 
   function gateKeys() {
     const keys = [];
     const priority0 = [];
-    const hero = countOf("shot-1");
-    for (let index = 0; index < hero; index += 1) {
-      const key = manager.key("shot-1", index);
-      if (index < HERO_DENSE || index % HERO_STRIDE === 0) priority0.push(key);
-    }
-    keys.push(...priority0);
-    for (const id of ["shot-2", "shot-3"]) {
+    for (const id of order) {
       const total = countOf(id);
-      for (let index = 0; index < total; index += HERO_STRIDE) keys.push(manager.key(id, index));
+      for (let index = 0; index < total; index += GATE_STRIDE) {
+        const key = manager.key(id, index);
+        keys.push(key);
+        if (id === order[0] && index < HERO_FIRST) priority0.push(key);
+      }
     }
     return { priority0, keys };
   }
@@ -382,8 +405,10 @@
     }
 
     const { priority0, keys } = gateKeys();
-    // During the gate the first three reels may stay decoded.
-    manager.keep = new Set(["shot-1", "shot-2", "shot-3"]);
+    // Every reel may be decoded during the gate; the budget still trims the
+    // decode cache, but the fetched record (manager.loaded) is what the gate
+    // counts, so a dropped bitmap does not reopen the gate.
+    manager.keep = new Set(order);
     manager.focus("shot-1", 0);
     for (const key of priority0) {
       const cut = key.lastIndexOf("/");
@@ -444,7 +469,7 @@
       ready();
       startBackground();
       scheduleRepaint();
-    }, 12000);
+    }, 20000);
   }
 
   // Cascade: even then odd frames of the next two reels, then the keyframes of
@@ -452,17 +477,16 @@
   // load, so a long visit does not silently download the whole library.
   function startBackground() {
     const plan = [];
-    for (const id of ["shot-2", "shot-3"]) {
+    // The odd frames the gate skipped, reel by reel, so every reel is complete
+    // before the visitor reaches the last one. Frames the gate already fetched
+    // are left alone: they are on disk and re-hydrate when their reel is near.
+    for (const id of order) {
       const total = countOf(id);
-      for (let index = 0; index < total; index += 2) plan.push([id, index]);
       for (let index = 1; index < total; index += 2) plan.push([id, index]);
-    }
-    for (const id of order.slice(3)) {
-      const total = countOf(id);
-      for (let index = 0; index < total; index += 4) plan.push([id, index]);
     }
     let priority = 400;
     for (const [id, index] of plan) {
+      if (manager.loaded.has(manager.key(id, index))) continue;
       manager.want(id, index, priority);
       priority += 0.001;
     }
