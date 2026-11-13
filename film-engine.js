@@ -12,7 +12,12 @@
   // Frames kept decoded at once. A 1080 frame is 1080x608x4 = 2.6 MB of GPU
   // memory, so this is the difference between 60 MB and a dead tab.
   const TIER = window.__psmTier || "1280";
-  const BUDGET = TIER === "1280" ? 40 : TIER === "1080" ? 56 : 88;
+  // Decoded budgets. A crisp 1080 frame is 1080x608x4 = 2.6 MB and a motion
+  // frame is 480x270x4 = 0.5 MB, so these two caps together are what keeps the
+  // tab inside a phone's memory.
+  const CRISP_BUDGET = TIER === "1280" ? 30 : TIER === "1080" ? 32 : 72;
+  const MOTION_BUDGET = 64;
+  const ASSET_VERSION = "v=4";
   // Radius of the window kept warm around the playhead while scrolling.
   const RUNWAY_AHEAD = 24;
   const RUNWAY_BEHIND = 10;
@@ -25,9 +30,17 @@
   const canvases = new Map();
   const posters = new Map();
   const shown = new Map();
+  const painted = new Map();
 
-  function url(id, index) {
-    return `assets/frames/${TIER}/${id}/${String(index).padStart(3, "0")}.jpg?v=3`;
+  function crispUrl(id, index) {
+    return `assets/frames/${TIER}/${id}/${String(index).padStart(3, "0")}.webp?${ASSET_VERSION}`;
+  }
+
+  // 480px WebP at 7.8 KB a frame: a whole reel is 1.2 MB, which is what makes
+  // the scroll itself smooth. The crisp frame of the same index replaces it the
+  // moment it is decoded.
+  function motionUrl(id, index) {
+    return `assets/frames/motion/${id}/${String(index).padStart(3, "0")}.webp?${ASSET_VERSION}`;
   }
 
   function countOf(id) {
@@ -63,7 +76,9 @@
   }
 
   class FrameManager {
-    constructor() {
+    constructor(build, budget) {
+      this.build = build;
+      this.budget = budget;
       this.bitmaps = new Map();
       this.queued = new Map();
       this.queue = [];
@@ -78,6 +93,10 @@
       // Every frame that has ever been fetched. Eviction takes the bitmap, not
       // this record: the gate can finish without holding a reel in memory.
       this.loaded = new Set();
+    }
+
+    get size() {
+      return this.bitmaps.size;
     }
 
     get count() {
@@ -129,7 +148,7 @@
         this.emit();
         this.pump();
       };
-      fetch(url(job.id, job.index), { credentials: "same-origin" })
+      fetch(this.build(job.id, job.index), { credentials: "same-origin" })
         .then((response) => {
           if (!response.ok) throw new Error(`frame ${response.status}`);
           return response.blob();
@@ -183,7 +202,7 @@
         release(bitmap);
         this.bitmaps.delete(key);
       }
-      if (this.bitmaps.size <= BUDGET) return;
+      if (this.bitmaps.size <= this.budget) return;
       const scored = [];
       for (const [key, bitmap] of this.bitmaps) {
         const cut = key.lastIndexOf("/");
@@ -193,7 +212,7 @@
         scored.push({ key, bitmap, distance });
       }
       scored.sort((a, b) => b.distance - a.distance);
-      for (let i = 0; i < scored.length && this.bitmaps.size > BUDGET; i += 1) {
+      for (let i = 0; i < scored.length && this.bitmaps.size > this.budget; i += 1) {
         release(scored[i].bitmap);
         this.bitmaps.delete(scored[i].key);
       }
@@ -235,7 +254,8 @@
     }
   }
 
-  const manager = new FrameManager();
+  const manager = new FrameManager(crispUrl, CRISP_BUDGET);
+  const motion = new FrameManager(motionUrl, MOTION_BUDGET);
 
   // ------------------------------------------------------------------ canvas
 
@@ -315,6 +335,7 @@
   // redraw the playhead, otherwise the canvas stays empty until the next scroll.
   function refresh() {
     shown.clear();
+    painted.clear();
     scheduleRepaint();
   }
 
@@ -325,13 +346,22 @@
   window.addEventListener("orientationchange", refresh);
   window.addEventListener("resize", refresh);
 
+  // Two tiers, one decision: the crisp frame if one is decoded near the
+  // playhead, otherwise the motion frame, which is a fifth of the bytes and is
+  // there for exactly this moment. A crisp frame that arrives later replaces
+  // the motion one at the same index.
   function paint(id, index, distance) {
-    const limit = Number.isFinite(shown.get(id)) ? Math.max(SHOW_GAP, Math.abs(index - shown.get(id))) : SHOW_GAP;
-    const found = manager.nearest(id, index, Math.min(limit, distance));
+    const previous = Number.isFinite(shown.get(id)) ? shown.get(id) : null;
+    const limit = previous === null ? SHOW_GAP : Math.max(SHOW_GAP, Math.abs(index - previous));
+    const reach = Math.min(limit, distance);
+    const crisp = manager.nearest(id, index, reach);
+    const found = crisp || motion.nearest(id, index, reach);
     if (!found) return false;
-    if (shown.get(id) === found.index) return true;
-    if (!draw(id, found.bitmap)) return false;
     shown.set(id, found.index);
+    const mark = `${crisp ? "c" : "m"}:${found.index}`;
+    if (painted.get(id) === mark) return true;
+    if (!draw(id, found.bitmap)) return false;
+    painted.set(id, mark);
     return true;
   }
 
@@ -339,21 +369,30 @@
 
   function scrub(id, index) {
     manager.focus(id, index);
+    motion.focus(id, index);
     const total = countOf(id);
     const previous = Number.isFinite(shown.get(id)) ? shown.get(id) : index;
     const forward = index >= previous;
     for (let step = 0; step <= (forward ? RUNWAY_AHEAD : RUNWAY_BEHIND); step += 1) {
       const ahead = forward ? index + step : index - step;
       const behind = forward ? index - step : index + step;
-      if (ahead >= 0 && ahead < total) manager.want(id, ahead, 10 + step);
-      if (step && behind >= 0 && behind < total) manager.want(id, behind, 20 + step);
+      if (ahead >= 0 && ahead < total) {
+        motion.want(id, ahead, 8 + step);
+        manager.want(id, ahead, 10 + step);
+      }
+      if (step && behind >= 0 && behind < total) {
+        motion.want(id, behind, 16 + step);
+        manager.want(id, behind, 20 + step);
+      }
     }
     paint(id, index, SHOW_GAP + 40);
   }
 
   function still(id) {
     manager.focus(id, 0);
+    motion.focus(id, 0);
     manager.want(id, 0, 1);
+    motion.want(id, 0, 2);
     paint(id, 0, 60);
   }
 
@@ -362,34 +401,33 @@
     const next = order[at + 1];
     if (!next) return;
     const total = Math.min(24, countOf(next));
-    for (let index = 0; index < total; index += 1) manager.want(next, index, 30 + index);
+    for (let index = 0; index < total; index += 1) {
+      motion.want(next, index, 26 + index);
+      manager.want(next, index, 30 + index);
+    }
   }
 
   // ------------------------------------------------------------- bootloader
 
   const BOOT_GATE = 0.5;
-  // Half of every reel before the gate opens: every second frame of shot-1..N.
-  // That is the coverage the scrubber needs to step through a whole reel, so no
-  // reel opens on an empty panel even if the visitor flicks straight past one.
-  // The frames behind the gate are cached, not held: memory stays at BUDGET and
-  // a reel re-hydrates from disk in milliseconds when it comes into reach.
-  const GATE_STRIDE = 2;
-  // The very first screen of the hero, at full density, so the opening is
-  // perfect the instant the overlay lifts.
-  const HERO_FIRST = 24;
 
+  // The gate is built around the motion tier. Every frame of every reel exists
+  // at 480px and 7.8 KB, so the whole library is ~4.9 MB: cheap enough to fetch
+  // completely before the overlay lifts. From that moment no reel can open on
+  // an empty panel, because every index has a light frame waiting for it, and
+  // the crisp frames stream in behind and take over as they arrive.
   function gateKeys() {
-    const keys = [];
-    const priority0 = [];
+    const motionKeys = [];
+    const crispKeys = [];
     for (const id of order) {
       const total = countOf(id);
-      for (let index = 0; index < total; index += GATE_STRIDE) {
-        const key = manager.key(id, index);
-        keys.push(key);
-        if (id === order[0] && index < HERO_FIRST) priority0.push(key);
-      }
+      for (let index = 0; index < total; index += 1) motionKeys.push(motion.key(id, index));
     }
-    return { priority0, keys };
+    // Plus half of the first reel at full resolution, so the opening is crisp
+    // the instant the concierge screen lifts.
+    const hero = countOf(order[0]);
+    for (let index = 0; index < hero; index += 2) crispKeys.push(manager.key(order[0], index));
+    return { motionKeys, crispKeys };
   }
 
   function boot(ready) {
@@ -404,21 +442,24 @@
       return;
     }
 
-    const { priority0, keys } = gateKeys();
-    // Every reel may be decoded during the gate; the budget still trims the
-    // decode cache, but the fetched record (manager.loaded) is what the gate
-    // counts, so a dropped bitmap does not reopen the gate.
+    const { motionKeys, crispKeys } = gateKeys();
+    // Every reel may be decoded during the gate; the budgets still trim the
+    // decode caches, but the fetched record is what the gate counts, so a
+    // dropped bitmap never reopens the gate.
     manager.keep = new Set(order);
-    manager.focus("shot-1", 0);
-    for (const key of priority0) {
-      const cut = key.lastIndexOf("/");
-      manager.want(key.slice(0, cut), Number(key.slice(cut + 1)), 1);
-    }
-    for (const key of keys) {
-      if (priority0.includes(key)) continue;
-      const cut = key.lastIndexOf("/");
-      manager.want(key.slice(0, cut), Number(key.slice(cut + 1)), 40);
-    }
+    motion.keep = new Set(order);
+    manager.focus(order[0], 0);
+    motion.focus(order[0], 0);
+    const queueKeys = (target, keys, base) => {
+      for (const key of keys) {
+        const cut = key.lastIndexOf("/");
+        target.want(key.slice(0, cut), Number(key.slice(cut + 1)), base);
+      }
+    };
+    // Motion first: it is what makes the first scroll smooth, and it is a fifth
+    // of the bytes of the same number of crisp frames.
+    queueKeys(motion, motionKeys, 1);
+    queueKeys(manager, crispKeys, 30);
 
     if (overlay) {
       overlay.hidden = false;
@@ -428,12 +469,14 @@
     let opened = false;
     const finish = () => {
       if (opened) return;
-      const gate = manager.progress(priority0);
-      const total = manager.progress(keys);
-      const shownPercent = Math.round(Math.max(gate, total) * 100);
+      const light = motion.progress(motionKeys);
+      const crisp = manager.progress(crispKeys);
+      const weight = motionKeys.length + crispKeys.length;
+      const overall = (light * motionKeys.length + crisp * crispKeys.length) / Math.max(1, weight);
+      const shownPercent = Math.round(overall * 100);
       if (bar) bar.style.width = `${shownPercent}%`;
       if (percent) percent.textContent = `${shownPercent}%`;
-      if (gate < 1 || total < BOOT_GATE) return;
+      if (light < 1 || crisp < BOOT_GATE) return;
       opened = true;
       manager.booted = true;
       unsubscribe();
@@ -450,7 +493,12 @@
       scheduleRepaint();
     };
 
-    const unsubscribe = manager.onChange(finish);
+    const unsubscribe = () => {
+      offCrisp();
+      offMotion();
+    };
+    const offCrisp = manager.onChange(finish);
+    const offMotion = motion.onChange(finish);
     finish();
     // Never trap the visitor behind a stalled network.
     setTimeout(() => {
@@ -483,6 +531,7 @@
     for (const id of order) {
       const total = countOf(id);
       for (let index = 1; index < total; index += 2) plan.push([id, index]);
+      for (let index = 2; index < total; index += 2) plan.push([id, index]);
     }
     let priority = 400;
     for (const [id, index] of plan) {
@@ -512,12 +561,17 @@
     debug() {
       return {
         tier: TIER,
-        budget: BUDGET,
+        budget: CRISP_BUDGET,
         active: manager.active,
         queued: manager.queue.length,
         decoded: manager.bitmaps.size,
+        motionDecoded: motion.bitmaps.size,
+        motionQueued: motion.queue.length,
+        loaded: manager.loaded.size,
+        motionLoaded: motion.loaded.size,
         keep: [...manager.keep],
         shown: Object.fromEntries(shown),
+        painted: Object.fromEntries(painted),
       };
     },
   };

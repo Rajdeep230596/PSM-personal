@@ -36,9 +36,16 @@
           var link = document.createElement("link");
           link.rel = "preload";
           link.as = "image";
-          link.setAttribute("href", "assets/frames/" + tier + "/shot-1/00" + i + ".jpg?v=3");
+          link.setAttribute("href", "assets/frames/" + tier + "/shot-1/00" + i + ".webp?v=4");
           if (i < 4) link.setAttribute("fetchpriority", "high");
           document.head.appendChild(link);
+          if (i < 2) {
+            var light = document.createElement("link");
+            light.rel = "preload";
+            light.as = "image";
+            light.setAttribute("href", "assets/frames/motion/shot-1/00" + i + ".webp?v=4");
+            document.head.appendChild(light);
+          }
         }
       })();
     </script>
@@ -373,7 +380,7 @@
     </div>
 
     <audio id="music" src="assets/coat.mp3?v=2" loop preload="none"></audio>
-    <script src="film-engine.js?v=2" defer></script>
-    <script src="main.js?v=131" defer></script>
+    <script src="film-engine.js?v=3" defer></script>
+    <script src="main.js?v=132" defer></script>
   </body>
 </html>
