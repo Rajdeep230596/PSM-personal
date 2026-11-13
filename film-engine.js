@@ -14,7 +14,10 @@
 (() => {
   // Four slots for crisp frames and four for sheet pages: eight in flight over
   // HTTP/2, which is what the host will actually service.
-  const CONCURRENCY = 8;
+  // Measured against this host: 8 streams is the sweet spot (8 pages in 3.0s)
+  // and 16 is slower (4.9s) because the host throttles. Pages get most of the
+  // slots; crisp frames only matter once a reel settles.
+  const CONCURRENCY = 10;
   const TIER = window.__psmTier || "1280";
   const ASSET_VERSION = "v=5";
   // Decoded budgets. A crisp 1080 frame is 2.6 MB, a sheet page is 480*270*16
@@ -28,7 +31,7 @@
   const SHEET_W = 320;
   const SHEET_H = 180;
   const SHEET_KEEP = 5;
-  const SHEET_SLOTS = 4;
+  const SHEET_SLOTS = 8;
   const RUNWAY_AHEAD = 24;
   const RUNWAY_BEHIND = 10;
   const SHOW_GAP = 20;
@@ -521,14 +524,18 @@
 
   // The plan the concierge screen waits on: close to the whole first film and
   // most of the others, expressed in pages rather than frames.
-  const GATE_FIRST = 0.9;
-  const GATE_REST = 0.8;
+  // 90% + 80% is 34 pages, which this host cannot deliver in under twelve
+  // seconds. The gate therefore takes the whole first reel (so the film you
+  // land on is complete and cannot stutter) plus the opening pages of the
+  // others, which is enough that no reel can look empty. The rest arrives on
+  // approach: each reel is ~0.6 MB, about four seconds of scrolling away.
+  const GATE_REST_PAGES = 2;
 
   function gatePlan() {
     const pages = [];
     order.forEach((id, at) => {
       const total = pageCount(id);
-      const want = Math.ceil(total * (at === 0 ? GATE_FIRST : GATE_REST));
+      const want = at === 0 ? total : Math.min(GATE_REST_PAGES, total);
       for (let page = 0; page < want; page += 1) pages.push(pageKey(id, page));
     });
     const hero = order[0];
@@ -628,7 +635,7 @@
       opened = true;
       close();
       startBackground();
-    }, 15000);
+    }, 12000);
   }
 
   // Everything the gate did not wait for: the rest of the pages in order, then

@@ -98,7 +98,7 @@ for (const reel of REELS) {
         "-f", "image2", "-start_number", String(first), "-i", join(from, "%03d.webp"),
         "-vf", `scale=${SHEET_CELL_W}:${SHEET_CELL_H}:flags=lanczos,tile=${SHEET_COLS}x${SHEET_CELLS / SHEET_COLS}`,
         "-frames:v", "1",
-        "-c:v", "libwebp", "-quality", "68", "-compression_level", "6",
+        "-c:v", "libwebp", "-quality", "60", "-compression_level", "6",
         "-pix_fmt", "yuv420p",
         join(to, `${String(page).padStart(2, "0")}.webp`),
       ],
