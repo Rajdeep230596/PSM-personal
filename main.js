@@ -257,286 +257,15 @@ function frameIndex(reel, progress) {
   return Math.min(reel.count - 1, Math.max(0, Math.floor(progress * reel.count)));
 }
 
-const frameCache = new Map();
-const frameQueue = [];
-const queuedAt = new Map();
-let frameSlots = 0;
+// All frame fetching, decoding, memory and painting lives in film-engine.js.
+// This side owns only the scroll mapping: reel in, frame index out.
 let scrollDirection = 1;
 let lastScrollTop = 0;
-let fillTimer = 0;
-
-// A long visit can touch all 633 frames. At 1080x608 each one is ~2.6 MB of
-// decoded pixels, so the cache is capped and trimmed by distance from the
-// playhead rather than by insertion order: the frames about to be shown are
-// the last thing to go. Roughly 120 MB of decoded frames at every tier.
-const FRAME_BUDGET = frameTier === "1280" ? 34 : frameTier === "1080" ? 46 : 96;
-const FRAME_KEEP = 24;
-// The head of the next reel is what the hand-off paints, but it is "infinitely
-// far" from the playhead, so the trim used to throw it away and the prewarm
-// fetched the same frames over and over. These stay pinned instead.
-const PIN_AHEAD = 6;
-const pinnedFrames = new Set();
+let hasScrolled = false;
 let activeReel = "shot-1";
 let activeIndex = 0;
 
-function framePlace(url) {
-  const match = /\/frames\/[^/]+\/([^/]+)\/(\d+)\.jpg/.exec(url);
-  return match ? { reel: match[1], index: Number(match[2]) } : null;
-}
-
-function trimFrames() {
-  if (frameCache.size <= FRAME_BUDGET) return;
-  const spare = [];
-  for (const [url, value] of frameCache) {
-    if (typeof value === "string") continue; // in flight, or already failed
-    const place = framePlace(url);
-    const distance = place && place.reel === activeReel ? Math.abs(place.index - activeIndex) : Number.MAX_SAFE_INTEGER;
-    if (distance <= FRAME_KEEP) continue;
-    if (pinnedFrames.has(url)) continue;
-    spare.push({ url, distance });
-  }
-  spare.sort((a, b) => b.distance - a.distance);
-  for (let i = 0; i < spare.length && frameCache.size > FRAME_BUDGET; i += 1) {
-    frameCache.delete(spare[i].url);
-  }
-}
-
-function keepOpeningFrame() {
-  const opening = partFile("shot-1", 0);
-  if (play1.getAttribute("src") !== opening) return;
-  play1.dataset.shown = "0";
-  play1.dataset.part = "0";
-  const store = () => {
-    if (play1.naturalWidth) frameCache.set(opening, play1);
-  };
-  if (play1.complete && play1.naturalWidth) {
-    store();
-    return;
-  }
-  frameCache.set(opening, "loading");
-  play1.addEventListener("load", store, { once: true });
-}
-
-keepOpeningFrame();
-
-// Six in flight is the per-host ceiling on HTTP/1.1, but the host serves the
-// films over HTTP/2, where one connection carries many streams. Ask for more
-// frames at once when the page itself arrived over a multiplexed protocol.
-const MULTIPLEXED = (() => {
-  try {
-    const nav = performance.getEntriesByType("navigation")[0];
-    const proto = nav && nav.nextHopProtocol;
-    return proto === "h2" || proto === "h3";
-  } catch (err) {
-    return false;
-  }
-})();
-// Shared hosting throttles concurrent requests per visitor, and twelve at once
-// made the whole page crawl where six had not. Eight is the modest win.
-const MAX_FRAME_SLOTS = MULTIPLEXED ? 8 : 6;
-const AHEAD_FRAMES = 22;
-const BEHIND_FRAMES = 8;
-// Before the visitor touches the page there is no direction to guess from, so
-// a long runway is just cold-start weight: 22 frames is ~690 KB on a retina
-// phone. Twelve covers a screen and a bit; the rest arrives on the first
-// scroll, when the loader knows which way to go.
-const AHEAD_BEFORE_SCROLL = 12;
-
-function enqueueFrame(url, priority = 50, reserved = false) {
-  if (frameCache.has(url)) return;
-  const queued = queuedAt.get(url);
-  if (queued !== undefined) {
-    if (queued <= priority) return;
-    for (let i = 0; i < frameQueue.length; i += 1) {
-      if (frameQueue[i].url === url) {
-        frameQueue[i].priority = priority;
-        frameQueue[i].reserved = reserved;
-        break;
-      }
-    }
-    queuedAt.set(url, priority);
-    return;
-  }
-  frameQueue.push({ url, priority, reserved });
-  queuedAt.set(url, priority);
-}
-
-// Two of the six slots are held for the next reel's head. Without them a fast
-// flick fills every slot with runway frames from the current reel, the hand-off
-// arrives with nothing loaded to paint, and the film sits still until the
-// network catches up. That was the 0.8s freeze at a reel change on a phone.
-const RESERVED_SLOTS = 1;
-let reservedInFlight = 0;
-
-function nextJob() {
-  if (reservedInFlight < RESERVED_SLOTS) {
-    const held = frameQueue.findIndex((job) => job.reserved);
-    if (held >= 0) return held;
-  }
-  const normal = frameQueue.findIndex((job) => !job.reserved);
-  return normal >= 0 ? normal : frameQueue.length ? 0 : -1;
-}
-
-function pumpFrames() {
-  if (frameQueue.length > 1) frameQueue.sort((a, b) => a.priority - b.priority);
-  while (frameSlots < MAX_FRAME_SLOTS && frameQueue.length) {
-    const pick = nextJob();
-    if (pick < 0) break;
-    const job = frameQueue.splice(pick, 1)[0];
-    queuedAt.delete(job.url);
-    if (frameCache.has(job.url)) continue;
-    frameCache.set(job.url, "loading");
-    frameSlots += 1;
-    if (job.reserved) reservedInFlight += 1;
-    const image = new Image();
-    image.decoding = "async";
-    // The runway in front of the playhead outranks the background fill.
-    if ("fetchPriority" in image) image.fetchPriority = job.priority < 8 ? "high" : "low";
-    // The network slot is freed the moment the bytes land. Waiting for
-    // decode() to resolve before freeing it deadlocks the loader: decoding a
-    // large frame can take longer than the next five downloads, so all six
-    // slots end up parked on decodes and the film stops advancing until they
-    // finish. That is the freeze-then-jump seen at a reel change on a phone.
-    const release = () => {
-      if (job.reserved) reservedInFlight -= 1;
-      frameSlots -= 1;
-    };
-    image.onload = () => {
-      release();
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        frameCache.set(job.url, image);
-        trimFrames();
-        render();
-      };
-      if (image.decode) {
-        image.decode().then(finish, finish);
-        // A frame that never reports decoded still gets used, exactly as it
-        // did before decode() was called at all, rather than being dropped.
-        setTimeout(finish, 1500);
-      } else {
-        finish();
-      }
-      pumpFrames();
-    };
-    image.onerror = () => {
-      release();
-      frameCache.set(job.url, "error");
-      trimFrames();
-      pumpFrames();
-      render();
-    };
-    image.src = job.url;
-  }
-}
-
-// Rebuilds the pending queue around the playhead, weighted towards where the
-// scroll is heading. Requests already in flight are never dropped, so a fast
-// scroll no longer restarts the reel from the current frame on every tick.
-function queueReel(id, count, center) {
-  // Reserved next-reel work survives a rebuild of the pending queue, otherwise
-  // every scroll tick would throw the prewarm away and re-queue it behind the
-  // runway frames it is meant to get ahead of.
-  const held = frameQueue.filter((job) => job.reserved);
-  frameQueue.length = 0;
-  queuedAt.clear();
-  for (let i = 0; i < held.length; i += 1) {
-    frameQueue.push(held[i]);
-    queuedAt.set(held[i].url, held[i].priority);
-  }
-  const forward = scrollDirection >= 0;
-  const runway = hasScrolled ? AHEAD_FRAMES : AHEAD_BEFORE_SCROLL;
-  const ahead = forward ? runway : BEHIND_FRAMES;
-  const behind = forward ? BEHIND_FRAMES : AHEAD_FRAMES;
-  for (let step = 0; step <= Math.max(ahead, behind); step += 1) {
-    const front = forward ? center + step : center - step;
-    const back = forward ? center - step : center + step;
-    if (step <= ahead && front >= 0 && front < count) enqueueFrame(partFile(id, front), step);
-    if (step && step <= behind && back >= 0 && back < count) enqueueFrame(partFile(id, back), step + 4);
-  }
-  pumpFrames();
-}
-
-// Once a real scroll settles, quietly extend the runway ahead of the playhead
-// so a fast flick later never waits. Never runs before the visitor interacts,
-// so the first paint is not competing with a megabyte of frames, and never
-// fetches a whole reel. Off on save-data connections.
-const FILL_AHEAD = 60;
-const FILL_BEHIND = 16;
-let hasScrolled = false;
-
-function scheduleFill(id, count, center) {
-  clearTimeout(fillTimer);
-  if (dataSaver || !hasScrolled) return;
-  fillTimer = setTimeout(() => {
-    for (let step = 0; step <= FILL_AHEAD; step += 1) {
-      const ahead = center + step;
-      if (ahead < count) enqueueFrame(partFile(id, ahead), 80 + step);
-    }
-    for (let step = 1; step <= FILL_BEHIND; step += 1) {
-      const behind = center - step;
-      if (behind >= 0) enqueueFrame(partFile(id, behind), 80 + step);
-    }
-    pumpFrames();
-  }, 300);
-}
-
-const reelOrder = ["shot-1", "shot-2", "shot-3", "shot-4"];
-
-// Fetches the head of the next reel while the current chapter is being read, so
-// the hand-off never waits on the network. Twelve frames ran out during a fast
-// flick, so the head is warmed to more than a screen's worth and the trigger is
-// moved out; these jobs are reserved (see RESERVED_SLOTS) and outrank fill.
-const PREWARM_FRAMES = 20;
-// Under one screen: the prewarm used to fire from the moment the page loaded,
-// so a third of the download slots went to a reel nobody had reached yet and
-// the reel on screen arrived slower. It now waits until the hand-off is close.
-const PREWARM_VIEWS = 1.2;
-function prewarmNext(picture) {
-  const id = picture.dataset.reel;
-  const next = reelOrder[reelOrder.indexOf(id) + 1];
-  const reel = reels[next];
-  if (!reel || !reel.count) return;
-  const section = document.getElementById(next);
-  if (!section) return;
-  const view = scroller.clientHeight;
-  if (section.offsetTop > scroller.scrollTop + view * PREWARM_VIEWS) {
-    pinnedFrames.clear();
-    return;
-  }
-  pinnedFrames.clear();
-  const pin = Math.min(PIN_AHEAD, reel.count);
-  for (let index = 0; index < pin; index += 1) pinnedFrames.add(partFile(next, index));
-  const head = Math.min(PREWARM_FRAMES, reel.count);
-  for (let index = 0; index < head; index += 1) enqueueFrame(partFile(next, index), 60 + index, true);
-  pumpFrames();
-}
-
-// A missing frame must never transport the picture. Without a cap the nearest
-// loaded frame can be a screenful away, so the film appears to skip ahead when
-// the runway has a hole in it.
-const SHOW_GAP = 20;
-
-function nearestFrame(id, count, index, maxGap = Infinity) {
-  const reach = Math.min(maxGap, count);
-  for (let step = 0; step < reach; step += 1) {
-    const ahead = index + step;
-    const behind = index - step;
-    if (ahead < count) {
-      const image = frameCache.get(partFile(id, ahead));
-      if (image && image !== "loading" && image !== "error") return { index: ahead, image };
-    }
-    if (step && behind >= 0) {
-      const image = frameCache.get(partFile(id, behind));
-      if (image && image !== "loading" && image !== "error") return { index: behind, image };
-    }
-  }
-  return null;
-}
-
-function holdFilm(picture, section, queue) {
+function holdFilm(picture, section, active) {
   const id = picture.dataset.reel;
   const reel = reels[id];
   if (!reel || !reel.count) return;
@@ -546,35 +275,16 @@ function holdFilm(picture, section, queue) {
   if (!near) return;
   const progress = sectionOnScreen(section) ? sectionProgress(section) : mid > section.offsetTop ? 1 : 0;
   const index = frameIndex(reel, progress);
-  if (queue) {
+  picture.dataset.center = String(index);
+  picture.dataset.part = String(index / reel.fps);
+  if (active) {
     activeReel = id;
     activeIndex = index;
   }
-  // Hold the frame already on screen rather than jumping across a gap; a reel
-  // that has never painted still takes whatever is closest so it cannot sit
-  // blank on the way in. A fast flick outruns the network though, and a fixed
-  // 20-frame limit then froze the picture for the rest of the gesture: the cap
-  // now grows with the distance already scrolled, so the film keeps stepping
-  // in proportion to the hand instead of stopping dead.
-  const shown = Number(picture.dataset.shown);
-  const gap = Number.isFinite(shown) ? Math.max(SHOW_GAP, Math.abs(index - shown)) : SHOW_GAP;
-  let ready = nearestFrame(id, reel.count, index, gap);
-  if (!ready && !picture.dataset.shown) ready = nearestFrame(id, reel.count, index);
-  if (ready && picture.dataset.shown !== String(ready.index)) {
-    picture.dataset.shown = String(ready.index);
-    picture.dataset.part = String(ready.index / reel.fps);
-    picture.src = ready.image.src;
-  }
-  if (queue && picture.dataset.center !== String(index)) {
-    picture.dataset.center = String(index);
-    queueReel(id, reel.count, index);
-    scheduleFill(id, reel.count, index);
-  }
+  window.PSMFilm.scrub(id, index);
 }
-// Reduced motion: the scrub is off, but every chapter still paints its own
-// still frame as it comes into view, so nothing is left as a black panel or a
-// blurred placeholder. One frame per reel, fetched only when the chapter is
-// within reach, and it never swaps again afterwards.
+
+// Reduced motion: one still per chapter, painted once.
 function paintStills() {
   films.forEach(([picture, section]) => {
     const id = picture.dataset.reel;
@@ -584,19 +294,12 @@ function paintStills() {
     const mid = scroller.scrollTop + view * 0.42;
     const near = mid > section.offsetTop - view * 0.6 && mid < section.offsetTop + section.offsetHeight + view * 0.6;
     if (!near) return;
-    activeReel = id;
-    activeIndex = 0;
-    const ready = nearestFrame(id, reel.count, 0);
-    if (ready) {
-      if (picture.dataset.shown === String(ready.index)) return;
-      picture.dataset.shown = String(ready.index);
-      picture.dataset.part = String(ready.index / reel.fps);
-      picture.src = ready.image.src;
-      return;
-    }
-    enqueueFrame(partFile(id, 0), 1);
-    pumpFrames();
+    window.PSMFilm.still(id);
   });
+}
+
+function prewarmNext(picture) {
+  window.PSMFilm.prewarm(picture.dataset.reel);
 }
 
 function paintFilms() {
@@ -993,3 +696,7 @@ function showPops(root, visible) {
 
 fitScreen();
 render();
+
+// The film engine owns every frame from here: it holds the concierge gate,
+// then streams and paints against the playhead.
+window.PSMFilm.init({ reels, ready: render });

@@ -42,9 +42,18 @@
         }
       })();
     </script>
-    <link rel="stylesheet" href="styles.css?v=62" />
+    <link rel="stylesheet" href="styles.css?v=63" />
   </head>
   <body>
+    <div class="boot" id="boot" role="status" aria-live="polite" hidden>
+      <div class="boot-inner">
+        <img class="boot-mark" src="assets/mark.webp" alt="PSM Infinity" width="64" height="64" />
+        <p class="boot-welcome">Welcome to your private concierge</p>
+        <p class="boot-caption">Curating your bespoke experience...</p>
+        <div class="boot-line" aria-hidden="true"><span class="boot-bar" id="boot-bar"></span></div>
+        <p class="boot-percent" id="boot-percent">0%</p>
+      </div>
+    </div>
     <svg aria-hidden="true" focusable="false" width="0" height="0" style="position: absolute">
       <filter id="deeper-blacks" color-interpolation-filters="sRGB">
         <feComponentTransfer>
@@ -104,6 +113,7 @@
       <section class="shot shot-scrub" id="shot-1" style="--span: 3.91">
         <div class="shot-sticky">
           <img class="shot-video" data-reel="shot-1" src="assets/shot-1.jpg?v=1" decoding="async" alt="" />
+          <canvas class="shot-video shot-frame" data-reel="shot-1" aria-hidden="true"></canvas>
           <div class="shade"></div>
           <button class="scroll-cue" type="button">Scroll</button>
         </div>
@@ -117,6 +127,7 @@
       <section class="shot shot-scrub" id="shot-2" style="--span: 3.19">
         <div class="shot-sticky">
           <img class="shot-video" data-reel="shot-2" src="assets/shot-2.jpg?v=1" fetchpriority="low" decoding="async" alt="" />
+          <canvas class="shot-video shot-frame" data-reel="shot-2" aria-hidden="true"></canvas>
           <div class="shade"></div>
         </div>
       </section>
@@ -129,6 +140,7 @@
       <section class="shot shot-scrub" id="shot-3" style="--span: 3.9">
         <div class="shot-sticky">
           <img class="shot-video" data-reel="shot-3" src="assets/shot-3.jpg?v=1" fetchpriority="low" decoding="async" alt="" />
+          <canvas class="shot-video shot-frame" data-reel="shot-3" aria-hidden="true"></canvas>
           <div class="shade"></div>
         </div>
       </section>
@@ -206,6 +218,7 @@
       <section class="shot shot-scrub" id="shot-4" style="--span: 4.49">
         <div class="shot-sticky">
           <img class="shot-video" data-reel="shot-4" src="assets/shot-4.jpg?v=1" fetchpriority="low" decoding="async" alt="" />
+          <canvas class="shot-video shot-frame" data-reel="shot-4" aria-hidden="true"></canvas>
           <div class="shade"></div>
         </div>
       </section>
@@ -360,6 +373,7 @@
     </div>
 
     <audio id="music" src="assets/coat.mp3?v=2" loop preload="none"></audio>
-    <script src="main.js?v=130" defer></script>
+    <script src="film-engine.js?v=1" defer></script>
+    <script src="main.js?v=131" defer></script>
   </body>
 </html>
