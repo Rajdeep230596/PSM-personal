@@ -5,6 +5,7 @@
     "dev": "serve . -l 5173"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "serve": "^14.2.5"
   }
 }

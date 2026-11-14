@@ -1,0 +1,7 @@
+# Crawlers
+User-agent: *
+Allow: /
+Disallow: /assets/frames/
+Disallow: /recordings/
+
+Sitemap: https://www.psminfinity.com/sitemap.xml

@@ -261,6 +261,11 @@
   // ------------------------------------------------------------ sheet pages
 
   const sheets = new Map(); // "reel/page" -> ImageBitmap
+  // Pages the gate has downloaded but not yet decoded. Decoding ten 1280x720
+  // bitmaps during the concierge gate blocks the main thread for close to two
+  // seconds on a throttled phone, so a page is decoded only when it is about
+  // to be drawn.
+  const sheetBlobs = new Map();
   const pageQueued = new Map(); // url -> job
   const pageQueue = [];
   const pageDone = new Set();
@@ -313,17 +318,34 @@
         if (!response.ok) throw new Error(`page ${response.status}`);
         return response.blob();
       })
-      .then(decode)
-      .then((bitmap) => {
+      .then((blob) => {
         pageDone.add(job.key);
-        sheets.set(job.key, bitmap);
-        trimSheets(job.id, job.page);
+        sheetBlobs.set(job.key, blob);
         done();
       })
       .catch(() => {
         pageFailed.add(job.key);
         done();
       });
+  }
+
+  // Decoded page if it is here, otherwise start decoding it and paint once it
+  // lands.
+  function pageBitmap(key) {
+    const bitmap = sheets.get(key);
+    if (bitmap) return bitmap;
+    const blob = sheetBlobs.get(key);
+    if (!blob) return null;
+    sheetBlobs.delete(key);
+    decode(blob)
+      .then((decoded) => {
+        sheets.set(key, decoded);
+        const cut = key.lastIndexOf("/");
+        trimSheets(key.slice(0, cut), Number(key.slice(cut + 1)));
+        scheduleRepaint();
+      })
+      .catch(() => {});
+    return null;
   }
 
   // Keep the pages around the playhead, close the rest.
@@ -446,7 +468,7 @@
       if (painted.get(id) === mark) return true;
     }
     const page = Math.floor(index / SHEET_CELLS);
-    let bitmap = sheets.get(pageKey(id, page));
+    let bitmap = pageBitmap(pageKey(id, page));
     let cell = index % SHEET_CELLS;
     if (!bitmap) {
       // Nearest decoded page on this reel, so the film still steps while the
@@ -546,7 +568,9 @@
   // ------------------------------------------------------------------ video
 
   function videoFor(id) {
-    if (id === order[0] || videoBroken.has(id)) return null;
+    // order is empty until init runs; without this guard a scrub arriving
+    // early would build a player for the hero and pull its 41 MB master.
+    if (!order.length || id === order[0] || videoBroken.has(id)) return null;
     const existing = videos.get(id);
     if (existing) return existing;
     const video = document.createElement("video");
@@ -617,18 +641,21 @@
   // others, which is enough that no reel can look empty. The rest arrives on
   // approach: each reel is ~0.6 MB, about four seconds of scrolling away.
   const GATE_REST_PAGES = 2;
+  const GATE_PAGES = 5;
 
   function gatePlan() {
     const pages = [];
     // Only the opening reel is frames now; the others are streams that start
     // filling the moment the gate lifts, so preloading their pages would be
     // wasted bytes.
-    const first = order[0];
-    const total = pageCount(first);
-    for (let page = 0; page < total; page += 1) pages.push(pageKey(first, page));
     const hero = order[0];
+    // Five pages is eighty frames, three screens of film: enough that the
+    // opening scroll never reaches the edge of what is ready, and 280 KB
+    // instead of 560 KB, which is what the gate's own duration costs.
+    const total = Math.min(GATE_PAGES, pageCount(hero));
+    for (let page = 0; page < total; page += 1) pages.push(pageKey(hero, page));
     const crispKeys = [];
-    const head = Math.min(12, countOf(hero));
+    const head = Math.min(8, countOf(hero));
     for (let index = 0; index < head; index += 2) crispKeys.push(manager.key(hero, index));
     return { pages, crispKeys };
   }
@@ -654,17 +681,21 @@
       return;
     }
 
-    // Posters first: four requests that guarantee every panel can paint.
-    for (const id of order) {
-      fetch(`assets/${id}.jpg?v=1`, { credentials: "same-origin" })
-        .then((response) => (response.ok ? response.blob() : Promise.reject(new Error("poster"))))
-        .then(decode)
-        .then((bitmap) => {
-          stills.set(id, bitmap);
-          scheduleRepaint();
-        })
-        .catch(() => {});
-    }
+    // Posters first: four requests that guarantee every panel can paint. The
+    // opening one is what the gate fades away to if the film is not ready.
+    const loadPosters = () => {
+      for (const id of order) {
+        if (stills.has(id)) continue;
+        fetch(`assets/${id}.jpg?v=1`, { credentials: "same-origin" })
+          .then((response) => (response.ok ? response.blob() : Promise.reject(new Error("poster"))))
+          .then(decode)
+          .then((bitmap) => {
+            stills.set(id, bitmap);
+            scheduleRepaint();
+          })
+          .catch(() => {});
+      }
+    };
 
     const { pages, crispKeys } = gatePlan();
     manager.keep = new Set(order);
@@ -698,16 +729,23 @@
       ready();
       scheduleRepaint();
     };
+    loadPosters();
 
     let opened = false;
+    let lastPercent = -1;
     const finish = () => {
       if (opened) return;
       const pageShare = pageProgress(pages);
       const crispShare = manager.progress(crispKeys);
       const overall = (pageShare * pages.length + crispShare * crispKeys.length) / Math.max(1, pages.length + crispKeys.length);
       const shownPercent = Math.round(overall * 100);
-      if (bar) bar.style.width = `${shownPercent}%`;
-      if (percent) percent.textContent = `${shownPercent}%`;
+      // Repainting the gate is not free on a throttled phone: only touch the
+      // DOM when the number actually changes.
+      if (shownPercent !== lastPercent) {
+        lastPercent = shownPercent;
+        if (bar) bar.style.width = `${shownPercent}%`;
+        if (percent) percent.textContent = `${shownPercent}%`;
+      }
       if (pageShare < 1 || crispShare < 0.5) return;
       opened = true;
       close();
@@ -732,10 +770,20 @@
     const hero = order[0];
     fillReel(hero, 400);
     const total = countOf(hero);
-    for (let index = 0; index < Math.min(total, 120); index += 1) manager.want(hero, index, 500 + index);
-    // Everything after the opening reel: one stream each, started now so the
-    // buffer is already deep by the time the visitor reaches it.
-    for (const id of order.slice(1)) videoFor(id);
+    for (let index = 0; index < Math.min(total, 24); index += 1) manager.want(hero, index, 500 + index);
+    // Everything after the opening reel is one stream each. Nothing is spent
+    // on them until the visitor moves: 3.5 MB of film that nobody has asked
+    // for is a cost, not a feature.
+    const startVideos = () => {
+      for (const id of order.slice(1)) videoFor(id);
+    };
+    const onMove = () => {
+      window.removeEventListener("scroll", onMove, { capture: true });
+      window.removeEventListener("pointerdown", onMove, { capture: true });
+      startVideos();
+    };
+    window.addEventListener("scroll", onMove, { capture: true, passive: true });
+    window.addEventListener("pointerdown", onMove, { capture: true, passive: true });
   }
 
   // --------------------------------------------------------------- plumbing

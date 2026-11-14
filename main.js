@@ -636,6 +636,10 @@ const status = document.getElementById("form-status");
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   const data = new FormData(form);
+  if (String(data.get("company") || "").trim()) {
+    status.textContent = "Thank you. Your enquiry has been noted.";
+    return;
+  }
   const lines = [
     "Hello PSM Infinity,",
     "",
@@ -649,7 +653,7 @@ form.addEventListener("submit", (event) => {
   const url = `https://wa.me/919007431000?text=${encodeURIComponent(lines.join("\n"))}`;
   const opened = window.open(url, "_blank", "noopener");
   if (!opened) window.location.href = url;
-  status.textContent = "WhatsApp is opening.";
+  status.textContent = "Your enquiry is ready in WhatsApp. Press send there and we will reply personally.";
 });
 function closeForm() {
   form.classList.remove("is-open");

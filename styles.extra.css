@@ -1,0 +1,101 @@
+/* Audit additions: privacy consent, enquiry link, vendor clarification.
+   These reuse the existing type scale so nothing is restyled. */
+.nav-enquire {
+  color: var(--gold, #c8a96a);
+}
+
+.vendor-note {
+  max-width: 46ch;
+  margin-top: 0.9rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  opacity: 0.66;
+}
+
+.consent {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  margin: 1.1rem 0 0.2rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.consent input {
+  margin-top: 0.2rem;
+  accent-color: #c8a96a;
+}
+
+.consent a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.hp-field {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.interlude .kicker {
+  margin-bottom: 0.7rem;
+}
+
+/* Plain reading page for the privacy notice, using the site's own tokens. */
+.privacy-page {
+  max-width: 62ch;
+  margin: 0 auto;
+  padding: 14vh 1.6rem 18vh;
+  font-family: var(--sans, system-ui, sans-serif);
+  line-height: 1.7;
+  color: #eee;
+}
+
+.privacy-page h1 {
+  font-size: clamp(1.7rem, 5vw, 2.6rem);
+  margin-bottom: 0.4rem;
+}
+
+.privacy-page h2 {
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 2rem 0 0.6rem;
+  opacity: 0.8;
+}
+
+.privacy-page p,
+.privacy-page li {
+  font-size: 0.95rem;
+  color: rgba(238, 238, 238, 0.82);
+}
+
+.privacy-page ul {
+  padding-left: 1.1rem;
+}
+
+.privacy-page a {
+  color: #c8a96a;
+}
+
+.privacy-page .back {
+  display: inline-block;
+  margin-top: 2.4rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.nav-links a.nav-enquire {
+  color: #c8a96a;
+}
+
+/* The gate card sits on an opaque gradient, so its backdrop blur renders
+   nothing visible while costing a full-surface blur on every repaint. */
+.boot-inner {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
