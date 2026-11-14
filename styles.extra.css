@@ -99,3 +99,28 @@
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+
+/* The opening line sits under the navigation, over the first reel. */
+.hero-copy {
+  position: absolute;
+  z-index: 3;
+  left: max(4vw, env(safe-area-inset-left));
+  right: max(4vw, env(safe-area-inset-right));
+  top: calc(var(--nav) + env(safe-area-inset-top) + 0.4rem);
+  pointer-events: none;
+}
+
+.hero-copy .kicker {
+  margin: 0 0 0.6rem;
+}
+
+.hero-copy h1 {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(1.9rem, 7.4vw, 3.3rem);
+  line-height: 1.05;
+  letter-spacing: 0.005em;
+  color: var(--ivory);
+  text-shadow: 0 2px 34px rgba(0, 0, 0, 0.5);
+}
