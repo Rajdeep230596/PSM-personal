@@ -2,6 +2,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 
 const root = process.cwd();
 const port = Number(process.argv[2] || 5401);
@@ -38,8 +39,25 @@ http
         return;
       }
       const ext = path.extname(file).toLowerCase();
+      const type = types[ext] || "application/octet-stream";
+      const compressible = /^(text\/|application\/(javascript|json|xml)|image\/svg)/.test(type);
+      const acceptsGzip = String(req.headers["accept-encoding"] || "").includes("gzip");
+      // The host gzips text; mirroring that here keeps lab numbers honest.
+      if (compressible && acceptsGzip) {
+        const gz = zlib.gzipSync(buf);
+        res.writeHead(200, {
+          "content-type": type,
+          "content-encoding": "gzip",
+          "content-length": gz.length,
+          "accept-ranges": "bytes",
+          "cache-control": "no-store",
+          vary: "accept-encoding",
+        });
+        res.end(gz);
+        return;
+      }
       res.writeHead(200, {
-        "content-type": types[ext] || "application/octet-stream",
+        "content-type": type,
         "accept-ranges": "bytes",
         "cache-control": "no-store",
       });

@@ -641,7 +641,13 @@
   // others, which is enough that no reel can look empty. The rest arrives on
   // approach: each reel is ~0.6 MB, about four seconds of scrolling away.
   const GATE_REST_PAGES = 2;
-  const GATE_PAGES = 5;
+  const GATE_PAGES = 2;
+  // The gate is a greeting, not a download screen. It opens on the first
+  // thirty-two frames and three crisp stills, then the rest of the reel fills in
+  // behind the scroll: painting the film progressively is worth far more to
+  // how fast the page feels than holding a curtain until everything lands.
+  const GATE_MIN_MS = 700;
+  const GATE_MAX_MS = 5000;
 
   function gatePlan() {
     const pages = [];
@@ -655,7 +661,7 @@
     const total = Math.min(GATE_PAGES, pageCount(hero));
     for (let page = 0; page < total; page += 1) pages.push(pageKey(hero, page));
     const crispKeys = [];
-    const head = Math.min(8, countOf(hero));
+    const head = Math.min(6, countOf(hero));
     for (let index = 0; index < head; index += 2) crispKeys.push(manager.key(hero, index));
     return { pages, crispKeys };
   }
@@ -716,6 +722,8 @@
 
     const close = () => {
       manager.booted = true;
+      // Surfaced for ?debug=1 so the boot time can be read on a real phone.
+      window.__psmGateMs = Math.round(performance.now());
       offPages();
       offCrisp();
       root.classList.remove("is-booting");
@@ -733,6 +741,7 @@
 
     let opened = false;
     let lastPercent = -1;
+    const bootedAt = performance.now();
     const finish = () => {
       if (opened) return;
       const pageShare = pageProgress(pages);
@@ -747,6 +756,10 @@
         if (percent) percent.textContent = `${shownPercent}%`;
       }
       if (pageShare < 1 || crispShare < 0.5) return;
+      if (performance.now() - bootedAt < GATE_MIN_MS) {
+        setTimeout(finish, GATE_MIN_MS);
+        return;
+      }
       opened = true;
       close();
       startBackground();
@@ -761,7 +774,7 @@
       opened = true;
       close();
       startBackground();
-    }, 12000);
+    }, GATE_MAX_MS);
   }
 
   // Everything the gate did not wait for: the rest of the pages in order, then
