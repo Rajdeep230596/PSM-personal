@@ -35,11 +35,10 @@
     <link rel="apple-touch-icon" href="assets/mark.webp" />
     <link rel="canonical" href="https://www.psminfinity.com/" />
     <meta name="theme-color" content="#090a0c" />
-    <link rel="preload" href="assets/fonts/cormorant-500.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="assets/fonts/cormorant-italic.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="assets/fonts/bodoni-moda-400.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="assets/fonts/bona-nova-400.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/shot-1.jpg?v=1" as="image" fetchpriority="high" />
-    <link rel="modulepreload" href="film-engine.min.js?v=10" />
+    <link rel="modulepreload" href="film-engine.min.js?v=16" />
     <!-- One tier is chosen here, while the head is still parsing, and its
          opening frames are preloaded: the film starts downloading before the
          stylesheet, and main.js reuses this choice instead of re-deriving it.
@@ -56,7 +55,7 @@
         // preload only produced cache-mismatch warnings and a second download.
       })();
     </script>
-    <link rel="stylesheet" href="styles.min.css?v=65" />
+    <link rel="stylesheet" href="styles.min.css?v=81" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -127,6 +126,14 @@
           <feFuncB type="table" tableValues="0 0.056 0.112 0.168 0.24 0.344 0.474 0.625 0.748 0.865 1" />
         </feComponentTransfer>
       </filter>
+      <filter id="shot-crisp" color-interpolation-filters="sRGB">
+        <feComponentTransfer>
+          <feFuncR type="table" tableValues="0 0.056 0.112 0.168 0.24 0.344 0.474 0.625 0.748 0.865 1" />
+          <feFuncG type="table" tableValues="0 0.056 0.112 0.168 0.24 0.344 0.474 0.625 0.748 0.865 1" />
+          <feFuncB type="table" tableValues="0 0.056 0.112 0.168 0.24 0.344 0.474 0.625 0.748 0.865 1" />
+        </feComponentTransfer>
+        <feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="0 -0.18 0 -0.18 1.72 -0.18 0 -0.18 0" />
+      </filter>
       <filter id="shot3-cabin" color-interpolation-filters="sRGB">
         <feComponentTransfer>
           <feFuncR type="table" tableValues="0 0.048 0.095 0.143 0.204 0.302 0.436 0.600 0.732 0.854 1" />
@@ -176,15 +183,15 @@
           <div class="shade"></div>
           <div class="hero-copy">
             <p class="kicker">Hi, this is Sunandan Mitra</p>
-            <h1>Private Luxury Concierge</h1>
+            <h1><span>Private</span> <span>Luxury</span> <span>Concierge</span></h1>
           </div>
           <button class="scroll-cue" type="button">Scroll</button>
         </div>
       </section>
 
       <section class="interlude interlude-fit" aria-label="Introduction">
-        <h2>Welcome to PSM Infinity</h2>
-        <p class="interlude-lead">Your world, personally curated — in Kolkata and worldwide</p>
+        <h2 class="intro-title"><span class="intro-welcome">Welcome to</span><span class="intro-name">PSM Infinity</span></h2>
+        <p class="interlude-lead intro-lead">Your world, personally curated — in Kolkata and worldwide</p>
       </section>
 
       <section class="shot shot-scrub" id="shot-2" style="--span: 3.19">
@@ -195,7 +202,7 @@
         </div>
       </section>
 
-      <section class="interlude interlude-fit" aria-label="The promise">
+      <section class="interlude interlude-fit interlude-promise" aria-label="The promise">
         <h2>Your world</h2>
         <h2>Personally curated</h2>
         <p class="interlude-lead">Lifestyle, travel and the arrangements that hold a day together.</p>
@@ -234,10 +241,6 @@
             </ol>
           </div>
           <div class="offer-panel" aria-label="Services, continued">
-            <div class="panel-head">
-              <p class="kicker">What we offer</p>
-              <h2>Services, held quietly.</h2>
-            </div>
             <ol class="service-list">
               <li>
                 <span>03</span>
@@ -256,10 +259,6 @@
             </ol>
           </div>
           <div class="offer-panel" aria-label="Services, continued">
-            <div class="panel-head">
-              <p class="kicker">What we offer</p>
-              <h2>Services, held quietly.</h2>
-            </div>
             <ol class="service-list">
               <li>
                 <span>05</span>
@@ -475,7 +474,7 @@
     </div>
 
     <audio id="music" src="assets/coat.mp3?v=2" loop preload="none"></audio>
-    <script src="film-engine.min.js?v=10" defer></script>
-    <script src="main.min.js?v=137" defer></script>
+    <script src="film-engine.min.js?v=16" defer></script>
+    <script src="main.min.js?v=138" defer></script>
   </body>
 </html>

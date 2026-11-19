@@ -30,8 +30,12 @@
   // moment the reel settles, which is where the sharpness actually matters.
   const SHEET_W = 320;
   const SHEET_H = 180;
-  const SHEET_KEEP = 5;
+  const SHEET_KEEP = 16;
   const SHEET_SLOTS = 8;
+  // Phones scrub from sprite pages. iOS will not present a canvas that lives
+  // inside position: sticky, and it will not show a new video frame from a seek,
+  // so both of those paths stay on the opening picture.
+  const phoneFilm = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
   const RUNWAY_AHEAD = 24;
   const RUNWAY_BEHIND = 10;
   const SHOW_GAP = 20;
@@ -43,9 +47,9 @@
   const stills = new Map();
   const painted = new Map();
   const shown = new Map();
-  // The opening reel is drawn from frames. Every reel after it is a single
-  // 540p stream: one request instead of eight pages, decoded in hardware, and
-  // the phone's CPU stays free for the scroll itself.
+  // Every reel is drawn from the crisp stills. The 720p streams for shots 2–4
+  // were soft enough that the jet, the crew and the car lost their edges once
+  // the picture was scaled up, so they are not used.
   const videos = new Map();
   const videoBroken = new Set();
 
@@ -55,6 +59,159 @@
 
   function sheetUrl(id, page) {
     return `assets/frames/sheet/${id}/${String(page).padStart(2, "0")}.webp?${ASSET_VERSION}`;
+  }
+
+  // iPhone 17 never completed a canvas frame. The boot percentage stayed at 0
+  // until the timeout because fetch() plus a blob decode never settled, and the
+  // empty canvas (black) was then laid over the poster. A plain image is the
+  // surface that phone actually paints. Requests are aborted if they stall so
+  // one hung download cannot pin every connection.
+  const phoneReady = new Set();
+  const phoneFailed = new Set();
+  const phoneQueued = new Set();
+  const phoneQueue = [];
+  const phoneListeners = new Set();
+  let phoneActive = 0;
+  let phoneSeq = 0;
+  let phonePlay = { reel: "", index: 0 };
+  let stageFront = null;
+  let stageBack = null;
+  let stageToken = 0;
+  const PHONE_SLOTS = 4;
+  const PHONE_TIMEOUT_MS = 7000;
+
+  function onPhone(listener) {
+    phoneListeners.add(listener);
+    return () => phoneListeners.delete(listener);
+  }
+
+  function emitPhone() {
+    for (const listener of phoneListeners) listener();
+  }
+
+  function wantPhone(id, index, priority) {
+    if (!phoneFilm || index < 0 || index >= countOf(id)) return;
+    const key = `${id}/${index}`;
+    if (phoneReady.has(key) || phoneFailed.has(key) || phoneQueued.has(key)) return;
+    phoneQueued.add(key);
+    phoneQueue.push({ id, index, key, priority, seq: phoneSeq++ });
+    phoneQueue.sort((a, b) => a.priority - b.priority || a.seq - b.seq);
+    pumpPhone();
+  }
+
+  function pumpPhone() {
+    while (phoneActive < PHONE_SLOTS && phoneQueue.length) {
+      const job = phoneQueue.shift();
+      phoneQueued.delete(job.key);
+      phoneActive += 1;
+      const image = new Image();
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        image.onload = null;
+        image.onerror = null;
+        phoneActive -= 1;
+        if (ok && image.naturalWidth > 0) phoneReady.add(job.key);
+        else {
+          image.src = "";
+          phoneFailed.add(job.key);
+        }
+        emitPhone();
+        if (ok) scheduleRepaint();
+        pumpPhone();
+      };
+      const timer = window.setTimeout(() => {
+        image.onload = null;
+        image.onerror = null;
+        image.src = "";
+        finish(false);
+      }, PHONE_TIMEOUT_MS);
+      image.onload = () => finish(true);
+      image.onerror = () => finish(false);
+      image.src = crispUrl(job.id, job.index);
+    }
+  }
+
+  function nearestPhone(id, index) {
+    const total = countOf(id);
+    for (let delta = 0; delta <= 6; delta += 1) {
+      const ahead = index + delta;
+      const behind = index - delta;
+      if (ahead < total && phoneReady.has(`${id}/${ahead}`)) return ahead;
+      if (delta && behind >= 0 && phoneReady.has(`${id}/${behind}`)) return behind;
+    }
+    return -1;
+  }
+
+  function ensureStages() {
+    if (stageFront) return;
+    const host = document.getElementById("screen");
+    if (!host) return;
+    const make = () => {
+      const image = document.createElement("img");
+      image.className = "film-stage";
+      image.alt = "";
+      image.decoding = "async";
+      // visibility, not display:none. iOS will not load an image that is
+      // display:none, which would leave the film on the poster forever.
+      image.style.visibility = "hidden";
+      host.appendChild(image);
+      return image;
+    };
+    stageFront = make();
+    stageBack = make();
+  }
+
+  function presentPhone(id, index) {
+    phonePlay = { reel: id, index };
+    ensureStages();
+    if (!stageFront) return;
+    const total = countOf(id);
+    for (let step = 0; step <= 16; step += 1) {
+      if (index + step < total) wantPhone(id, index + step, step);
+      if (step && index - step >= 0) wantPhone(id, index - step, 6 + step);
+    }
+    const frame = nearestPhone(id, index);
+    if (frame < 0) return;
+    markGrade(id);
+    const url = crispUrl(id, frame);
+    const mark = `i:${frame}`;
+    if (painted.get(id) === mark) {
+      if (placeStage(id)) stageFront.style.visibility = "visible";
+      return;
+    }
+    const absolute = new URL(url, document.baseURI).href;
+    if (stageBack.dataset.pending === absolute) return;
+    stageBack.dataset.pending = absolute;
+    const token = String(++stageToken);
+    stageBack.dataset.token = token;
+    const reveal = () => {
+      if (stageBack.dataset.token !== token || !stageBack.naturalWidth) return;
+      if (!placeStage(id)) {
+        stageBack.dataset.pending = "";
+        return;
+      }
+      stageBack.style.visibility = "visible";
+      stageFront.style.visibility = "hidden";
+      const previous = stageFront;
+      stageFront = stageBack;
+      stageBack = previous;
+      stageBack.dataset.pending = "";
+      painted.set(id, mark);
+      shown.set(id, frame);
+      document.documentElement.classList.add("has-film-stage");
+    };
+    stageBack.onload = reveal;
+    stageBack.onerror = () => {
+      stageBack.dataset.pending = "";
+    };
+    if (stageBack.src === absolute && stageBack.complete && stageBack.naturalWidth) {
+      reveal();
+      return;
+    }
+    stageBack.src = url;
   }
 
   function countOf(id) {
@@ -67,11 +224,17 @@
   }
 
   function release(bitmap) {
+    if (bitmap && bitmap.__url) {
+      URL.revokeObjectURL(bitmap.__url);
+      bitmap.__url = "";
+    }
     if (bitmap && typeof bitmap.close === "function") bitmap.close();
   }
 
   function decode(blob) {
-    if (typeof window.createImageBitmap === "function") {
+    // createImageBitmap on iOS often draws once and then sticks. An Image
+    // element keeps presenting new frames to the canvas.
+    if (!phoneFilm && typeof window.createImageBitmap === "function") {
       return window.createImageBitmap(blob).catch(() => decodeWithImage(blob));
     }
     return decodeWithImage(blob);
@@ -82,7 +245,11 @@
       const scratch = URL.createObjectURL(blob);
       const image = new Image();
       image.onload = () => {
-        URL.revokeObjectURL(scratch);
+        // iOS draws a blank frame if the blob URL is revoked while the
+        // image is still the canvas source. Release it with the bitmap.
+        // image.decode() is not waited on: on iPhone 17 it never settles,
+        // the slot stays busy, and the boot screen sits at 0%.
+        image.__url = scratch;
         resolve(image);
       };
       image.onerror = () => {
@@ -143,7 +310,8 @@
       if (this.queue.length > 1) {
         this.queue.sort((a, b) => a.priority - b.priority || a.seq - b.seq);
       }
-      while (this.active < CONCURRENCY - SHEET_SLOTS && this.queue.length) {
+      const slots = phoneFilm ? 6 : CONCURRENCY - SHEET_SLOTS;
+      while (this.active < slots && this.queue.length) {
         const job = this.queue.shift();
         this.queued.delete(job.key);
         this.active += 1;
@@ -157,6 +325,13 @@
         this.emit();
         this.pump();
       };
+      // Phones never fetch frames. On iPhone 17 those fetches never settled and
+      // the boot screen stayed at 0% until it gave up.
+      if (phoneFilm) {
+        this.failed.add(job.key);
+        done();
+        return;
+      }
       fetch(crispUrl(job.id, job.index), { credentials: "same-origin" })
         .then((response) => {
           if (!response.ok) throw new Error(`frame ${response.status}`);
@@ -298,13 +473,16 @@
     if (pageQueue.length > 1) {
       pageQueue.sort((a, b) => a.priority - b.priority || a.seq - b.seq);
     }
-    while (pageActive < SHEET_SLOTS && pageQueue.length) {
+    const slots = phoneFilm ? 4 : SHEET_SLOTS;
+    while (pageActive < slots && pageQueue.length) {
       const job = pageQueue.shift();
       pageQueued.delete(job.key);
       pageActive += 1;
       loadPage(job);
     }
   }
+
+  const decoding = new Set();
 
   function loadPage(job) {
     const done = () => {
@@ -313,15 +491,35 @@
       scheduleRepaint();
       pumpPages();
     };
+    if (phoneFilm) {
+      pageFailed.add(job.key);
+      done();
+      return;
+    }
     fetch(sheetUrl(job.id, job.page), { credentials: "same-origin" })
       .then((response) => {
         if (!response.ok) throw new Error(`page ${response.status}`);
         return response.blob();
       })
       .then((blob) => {
-        pageDone.add(job.key);
+        // Keep the bytes. Trimmed bitmaps can be decoded again without another
+        // download, which is what makes a second pass through a reel instant.
         sheetBlobs.set(job.key, blob);
-        done();
+        // The opening reel is decoded before the slot is freed, so the gate
+        // cannot open on a film that is still a poster. Later reels decode
+        // off to the side and do not hold up the download.
+        if (phoneFilm && order[0] && job.id !== order[0]) {
+          pageDone.add(job.key);
+          pageBitmap(job.key);
+          done();
+          return;
+        }
+        return decode(blob).then((bitmap) => {
+          sheets.set(job.key, bitmap);
+          pageDone.add(job.key);
+          trimSheets();
+          done();
+        });
       })
       .catch(() => {
         pageFailed.add(job.key);
@@ -329,38 +527,48 @@
       });
   }
 
-  // Decoded page if it is here, otherwise start decoding it and paint once it
-  // lands.
+  // Bitmap if it is decoded. If the bytes are already here, decode them and
+  // paint on the next frame instead of going back to the network.
   function pageBitmap(key) {
     const bitmap = sheets.get(key);
     if (bitmap) return bitmap;
     const blob = sheetBlobs.get(key);
-    if (!blob) return null;
-    sheetBlobs.delete(key);
+    if (!blob || decoding.has(key)) return null;
+    decoding.add(key);
     decode(blob)
       .then((decoded) => {
+        decoding.delete(key);
         sheets.set(key, decoded);
         const cut = key.lastIndexOf("/");
         trimSheets(key.slice(0, cut), Number(key.slice(cut + 1)));
         scheduleRepaint();
       })
-      .catch(() => {});
+      .catch(() => {
+        decoding.delete(key);
+      });
     return null;
   }
 
-  // Keep the pages around the playhead, close the rest.
-  function trimSheets(id, page) {
-    if (sheets.size <= SHEET_KEEP) return;
+  // Keep the pages around the playhead, close the rest. Blobs stay.
+  function trimSheets() {
+    if (!manager.booted) return;
+    const headId = manager.playhead.reel || order[0] || "";
+    const nextId = order[order.indexOf(headId) + 1] || "";
+    const budget = Math.max(SHEET_KEEP, pageCount(headId) + (nextId ? pageCount(nextId) : 0));
+    if (sheets.size <= budget) return;
+    const headPage = Math.floor((manager.playhead.index || 0) / SHEET_CELLS);
     const scored = [];
     for (const [key, bitmap] of sheets) {
       const cut = key.lastIndexOf("/");
       const reelId = key.slice(0, cut);
       const pageIndex = Number(key.slice(cut + 1));
-      const distance = reelId === id ? Math.abs(pageIndex - page) : 1000;
+      let distance = 500 + pageIndex;
+      if (reelId === headId) distance = Math.abs(pageIndex - headPage);
+      else if (reelId === nextId) distance = 40 + pageIndex;
       scored.push({ key, bitmap, distance });
     }
     scored.sort((a, b) => b.distance - a.distance);
-    for (let i = 0; i < scored.length && sheets.size > SHEET_KEEP; i += 1) {
+    for (let i = 0; i < scored.length && sheets.size > budget; i += 1) {
       release(scored[i].bitmap);
       sheets.delete(scored[i].key);
     }
@@ -373,7 +581,72 @@
 
   // ----------------------------------------------------------------- canvas
 
+  let stageCanvas = null;
+
+  function staging() {
+    return phoneFilm && !document.documentElement.classList.contains("force-landscape");
+  }
+
+  function ensureStage() {
+    if (stageCanvas) return stageCanvas;
+    const host = document.getElementById("screen");
+    if (!host) return null;
+    const canvas = document.createElement("canvas");
+    canvas.className = "film-stage";
+    canvas.hidden = true;
+    canvas.setAttribute("aria-hidden", "true");
+    host.appendChild(canvas);
+    stageCanvas = canvas;
+    return canvas;
+  }
+
+  // The picture band inside a full-screen sticky, matching object-fit: contain
+  // on a 16:9 frame. The canvas sits on this band, above the scroller. iOS
+  // will not show a canvas painted behind a scrolling layer, which is why the
+  // film turned into a black panel.
+  function filmBand(rect) {
+    const ratio = 16 / 9;
+    let width = rect.width;
+    let height = width / ratio;
+    if (height > rect.height) {
+      height = rect.height;
+      width = height * ratio;
+    }
+    return {
+      left: rect.left + (rect.width - width) / 2,
+      top: rect.top + (rect.height - height) / 2,
+      width,
+      height,
+    };
+  }
+
+  function placeStage(id) {
+    const nodes = [stageFront, stageBack, stageCanvas].filter(Boolean);
+    const sticky = document.querySelector(`#${id} .shot-sticky`);
+    const host = document.getElementById("screen");
+    if (!nodes.length || !sticky || !host) return false;
+    const hostRect = host.getBoundingClientRect();
+    const band = filmBand(sticky.getBoundingClientRect());
+    const visible = band.width > 8 && band.height > 8 && band.top + band.height > hostRect.top + 4 && band.top < hostRect.bottom - 4;
+    if (!visible) {
+      for (const node of nodes) node.style.visibility = "hidden";
+      return false;
+    }
+    for (const node of nodes) {
+      node.style.left = `${band.left - hostRect.left}px`;
+      node.style.top = `${band.top - hostRect.top}px`;
+      node.style.width = `${band.width}px`;
+      node.style.height = `${band.height}px`;
+      node.style.right = "auto";
+      node.style.bottom = "auto";
+    }
+    return true;
+  }
+
   function surface(id) {
+    if (staging()) return ensureStage();
+    document.documentElement.classList.remove("has-film-stage");
+    if (stageCanvas) stageCanvas.hidden = true;
     if (canvases.has(id)) return canvases.get(id);
     const canvas = document.querySelector(`#${id} canvas.shot-frame`);
     if (canvas) canvases.set(id, canvas);
@@ -389,15 +662,83 @@
     return fit;
   }
 
+  // Shot 1's grade: the same curve as the #shot1-blacks filter. It is baked into
+  // the picture that plays, because a CSS filter on the canvas sticks on iOS.
+  const GRADED = { "shot-2": 1, "shot-3": 1, "shot-4": 1 };
+  const GRADE_STOPS = [0, 0.056, 0.112, 0.168, 0.24, 0.344, 0.474, 0.625, 0.748, 0.865, 1];
+  const GRADE_LUT = new Uint8ClampedArray(256);
+  for (let step = 0; step < 256; step += 1) {
+    const position = (step / 255) * 10;
+    const lower = Math.floor(position);
+    const upper = Math.min(10, lower + 1);
+    const mix = position - lower;
+    GRADE_LUT[step] = Math.round((GRADE_STOPS[lower] * (1 - mix) + GRADE_STOPS[upper] * mix) * 255);
+  }
+  const gradeCache = new WeakMap();
+
+  function markGrade(id) {
+    const on = !!GRADED[id];
+    if (stageFront) stageFront.classList.toggle("is-shot1-grade", on);
+    if (stageBack) stageBack.classList.toggle("is-shot1-grade", on);
+  }
+
+  function gradedSource(bitmap) {
+    const cached = gradeCache.get(bitmap);
+    if (cached) return cached;
+    const width = bitmap.videoWidth || bitmap.width;
+    const height = bitmap.videoHeight || bitmap.height;
+    if (!width || !height) return bitmap;
+    const copy = document.createElement("canvas");
+    copy.width = width;
+    copy.height = height;
+    const context = copy.getContext("2d", { willReadFrequently: true });
+    context.drawImage(bitmap, 0, 0, width, height);
+    const image = context.getImageData(0, 0, width, height);
+    const data = image.data;
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = GRADE_LUT[data[i]];
+      data[i + 1] = GRADE_LUT[data[i + 1]];
+      data[i + 2] = GRADE_LUT[data[i + 2]];
+    }
+    // A light unsharp after the grade. The curve darkens the mids, and without
+    // this the jet, the crew and the car read as smoothed.
+    const src = new Uint8ClampedArray(data);
+    const amount = 0.72;
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const i = (y * width + x) * 4;
+        const l = i - 4;
+        const r = i + 4;
+        const u = i - width * 4;
+        const d = i + width * 4;
+        for (let c = 0; c < 3; c += 1) {
+          const center = src[i + c];
+          const blur = (src[l + c] + src[r + c] + src[u + c] + src[d + c]) * 0.25;
+          let sharp = center + (center - blur) * amount;
+          if (sharp < 0) sharp = 0;
+          else if (sharp > 255) sharp = 255;
+          data[i + c] = sharp;
+        }
+      }
+    }
+    context.putImageData(image, 0, 0);
+    gradeCache.set(bitmap, copy);
+    return copy;
+  }
+
   // Draws a bitmap, or a cell of a sheet, into the reel's canvas with the same
   // framing the poster uses (cover or contain, centred).
   function draw(id, bitmap, sx, sy, sw, sh) {
     const canvas = surface(id);
     if (!canvas || !bitmap) return false;
+    if (canvas === stageCanvas) {
+      document.documentElement.classList.add("has-film-stage");
+      if (!placeStage(id)) return false;
+    }
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     if (width < 2 || height < 2) return false;
-    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    const scale = Math.min(window.devicePixelRatio || 1, phoneFilm ? 3 : 2);
     const targetW = Math.round(width * scale);
     const targetH = Math.round(height * scale);
     if (canvas.width !== targetW || canvas.height !== targetH) {
@@ -414,13 +755,29 @@
       : Math.max(targetW / sourceW, targetH / sourceH);
     const drawW = sourceW * ratio;
     const drawH = sourceH * ratio;
-    const context = canvas.getContext("2d", { alpha: true });
+    const context = canvas.getContext("2d");
     if (!context) return false;
+    const source = GRADED[id] && !(bitmap instanceof HTMLVideoElement) ? gradedSource(bitmap) : bitmap;
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.fillStyle = "#050607";
+    context.fillRect(0, 0, targetW, targetH);
     if (hasRect) {
-      context.drawImage(bitmap, sx, sy, sourceW, sourceH, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
+      context.drawImage(source, sx, sy, sourceW, sourceH, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
     } else {
-      context.drawImage(bitmap, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
+      context.drawImage(source, (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH);
     }
+    if (GRADED[id] && bitmap instanceof HTMLVideoElement) {
+      const frame = context.getImageData(0, 0, targetW, targetH);
+      const data = frame.data;
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = GRADE_LUT[data[i]];
+        data[i + 1] = GRADE_LUT[data[i + 1]];
+        data[i + 2] = GRADE_LUT[data[i + 2]];
+      }
+      context.putImageData(frame, 0, 0);
+    }
+    if (canvas === stageCanvas) canvas.hidden = false;
     return true;
   }
 
@@ -433,6 +790,12 @@
       if (done) return;
       done = true;
       repaintQueued = false;
+      if (phoneFilm) {
+        const reel = phonePlay.reel || order[0];
+        if (!reel || !manager.booted) return;
+        presentPhone(reel, phonePlay.reel ? phonePlay.index : 0);
+        return;
+      }
       const { reel, index } = manager.playhead;
       if (!reel || !manager.booted) return;
       const video = videoFor(reel);
@@ -454,45 +817,62 @@
   }
 
   function paint(id, index, distance) {
-    const previous = Number.isFinite(shown.get(id)) ? shown.get(id) : null;
-    const limit = previous === null ? SHOW_GAP : Math.max(SHOW_GAP, Math.abs(index - previous));
-    const reach = Math.min(limit, distance);
-    const crisp = manager.nearest(id, index, reach);
+    // A full-size frame wins whenever it is the moment on screen. The sprite
+    // sheet only covers the gap while that frame is still decoding, so the
+    // film stays sharp instead of sitting on the 320px cell.
+    const crisp = manager.nearest(id, index, GRADED[id] ? 6 : 2);
     if (crisp) {
-      shown.set(id, crisp.index);
       const mark = `c:${crisp.index}`;
-      if (painted.get(id) !== mark && draw(id, crisp.bitmap)) {
+      if (painted.get(id) === mark) return true;
+      if (draw(id, crisp.bitmap)) {
         painted.set(id, mark);
+        shown.set(id, crisp.index);
         return true;
       }
-      if (painted.get(id) === mark) return true;
+    }
+    // A soft 320px cell reads as video smoothing on the subjects. Hold the
+    // last crisp frame for a short gap rather than swapping it in.
+    if (GRADED[id] && String(painted.get(id) || "").startsWith("c:")) {
+      const held = shown.get(id);
+      if (held !== undefined && Math.abs(held - index) <= 16) {
+        if (staging()) placeStage(id);
+        return true;
+      }
     }
     const page = Math.floor(index / SHEET_CELLS);
-    let bitmap = pageBitmap(pageKey(id, page));
-    let cell = index % SHEET_CELLS;
-    if (!bitmap) {
-      // Nearest decoded page on this reel, so the film still steps while the
-      // page under the playhead is still downloading.
-      let best = -1;
-      for (const key of sheets.keys()) {
-        if (!key.startsWith(`${id}/`)) continue;
-        const pageIndex = Number(key.slice(key.lastIndexOf("/") + 1));
-        if (best < 0 || Math.abs(pageIndex - page) < Math.abs(best - page)) best = pageIndex;
-      }
-      if (best >= 0) {
-        bitmap = sheets.get(pageKey(id, best));
-        const within = index - best * SHEET_CELLS;
-        cell = Math.min(Math.max(within, 0), SHEET_CELLS - 1);
-      }
-    }
-    if (bitmap) {
+    const cell = index % SHEET_CELLS;
+    const exact = pageBitmap(pageKey(id, page));
+    if (exact) {
       const mark = `s:${page}:${cell}`;
       if (painted.get(id) === mark) return true;
-      if (drawSheetCell(id, bitmap, index, cell)) {
+      if (drawSheetCell(id, exact, index, cell)) {
         painted.set(id, mark);
         shown.set(id, index);
         return true;
       }
+    }
+    // One page either side can stand in while its neighbour decodes. Further
+    // away than that, hold the frame already on screen instead of snapping
+    // back to the poster.
+    let best = -1;
+    for (const key of sheets.keys()) {
+      if (!key.startsWith(`${id}/`)) continue;
+      const pageIndex = Number(key.slice(key.lastIndexOf("/") + 1));
+      if (best < 0 || Math.abs(pageIndex - page) < Math.abs(best - page)) best = pageIndex;
+    }
+    if (best >= 0 && Math.abs(best - page) <= 1) {
+      const near = sheets.get(pageKey(id, best));
+      const nearCell = Math.min(Math.max(index - best * SHEET_CELLS, 0), SHEET_CELLS - 1);
+      const mark = `s:${best}:${nearCell}`;
+      if (painted.get(id) === mark) return true;
+      if (near && drawSheetCell(id, near, index, nearCell)) {
+        painted.set(id, mark);
+        shown.set(id, best * SHEET_CELLS + nearCell);
+        return true;
+      }
+    } else if (painted.has(id)) {
+      if (staging()) placeStage(id);
+      return true;
     }
     const still = stills.get(id);
     if (still) {
@@ -511,6 +891,16 @@
   let activeReel = "";
 
   function scrub(id, index) {
+    if (phoneFilm) {
+      presentPhone(id, index);
+      if (id !== activeReel) {
+        activeReel = id;
+        const next = order[order.indexOf(id) + 1];
+        const head = next ? Math.min(12, countOf(next)) : 0;
+        for (let frame = 0; frame < head; frame += 1) wantPhone(next, frame, 30 + frame);
+      }
+      return;
+    }
     const video = videoFor(id);
     if (video) {
       if (id !== activeReel) {
@@ -527,13 +917,15 @@
     wantPage(id, page, 6);
     wantPage(id, page + 1, 9);
     wantPage(id, page - 1, 9);
+    pageBitmap(pageKey(id, page));
+    pageBitmap(pageKey(id, page + 1));
     const previous = Number.isFinite(shown.get(id)) ? shown.get(id) : index;
     const forward = index >= previous;
     for (let step = 0; step <= (forward ? RUNWAY_AHEAD : RUNWAY_BEHIND); step += 1) {
       const ahead = forward ? index + step : index - step;
       const behind = forward ? index - step : index + step;
-      if (ahead >= 0 && ahead < total) manager.want(id, ahead, 10 + step);
-      if (step && behind >= 0 && behind < total) manager.want(id, behind, 20 + step);
+      if (ahead >= 0 && ahead < total) manager.want(id, ahead, 1 + step);
+      if (step && behind >= 0 && behind < total) manager.want(id, behind, 3 + step);
     }
     // Crossing into a reel pulls the next one in fully, as asked: at reel 2 the
     // third reel completes, at reel 3 the fourth does.
@@ -545,12 +937,33 @@
     paint(id, index, SHOW_GAP + 40);
   }
 
+  // Asks for the pages under a reel that is near, without painting over the
+  // one the stage is showing.
+  function prepare(id, index) {
+    if (phoneFilm) {
+      wantPhone(id, index, 12);
+      wantPhone(id, index + 1, 13);
+      wantPhone(id, index - 1, 14);
+      return;
+    }
+    const page = Math.floor(index / SHEET_CELLS);
+    wantPage(id, page, 12);
+    wantPage(id, page + 1, 16);
+    wantPage(id, page - 1, 18);
+    pageBitmap(pageKey(id, page));
+  }
+
   function fillReel(id, priority = 40) {
     const pages = pageCount(id);
     for (let page = 0; page < pages; page += 1) wantPage(id, page, priority);
   }
 
   function still(id) {
+    if (phoneFilm) {
+      wantPhone(id, 0, 1);
+      presentPhone(id, 0);
+      return;
+    }
     manager.focus(id, 0);
     manager.want(id, 0, 1);
     wantPage(id, 0, 1);
@@ -560,6 +973,11 @@
   function prewarm(id) {
     const next = order[order.indexOf(id) + 1];
     if (!next) return;
+    if (phoneFilm) {
+      const head = Math.min(16, countOf(next));
+      for (let index = 0; index < head; index += 1) wantPhone(next, index, 12 + index);
+      return;
+    }
     const video = videoFor(next);
     if (video) return;
     fillReel(next, 30);
@@ -567,33 +985,10 @@
 
   // ------------------------------------------------------------------ video
 
-  function videoFor(id) {
-    // order is empty until init runs; without this guard a scrub arriving
-    // early would build a player for the hero and pull its 41 MB master.
-    if (!order.length || id === order[0] || videoBroken.has(id)) return null;
-    const existing = videos.get(id);
-    if (existing) return existing;
-    const video = document.createElement("video");
-    video.muted = true;
-    video.defaultMuted = true;
-    video.playsInline = true;
-    video.setAttribute("playsinline", "");
-    video.setAttribute("muted", "");
-    video.preload = "auto";
-    video.addEventListener("seeked", () => {
-      if (video.dataset.pending !== undefined) drawVideo(id, video);
-    });
-    video.addEventListener("loadeddata", () => {
-      if (video.dataset.pending !== undefined) drawVideo(id, video);
-    });
-    video.addEventListener("error", () => {
-      videoBroken.add(id);
-      videos.delete(id);
-    });
-    video.src = `assets/video/${id}.mp4?v=1`;
-    video.load();
-    videos.set(id, video);
-    return video;
+  function videoFor() {
+    // The 720p files smear the jet, the crew and the car once they are scaled
+    // up. Every reel is drawn from the crisp stills instead.
+    return null;
   }
 
   function drawVideo(id, video) {
@@ -640,29 +1035,24 @@
   // land on is complete and cannot stutter) plus the opening pages of the
   // others, which is enough that no reel can look empty. The rest arrives on
   // approach: each reel is ~0.6 MB, about four seconds of scrolling away.
-  const GATE_REST_PAGES = 2;
   const GATE_PAGES = 2;
-  // The gate is a greeting, not a download screen. It opens on the first
-  // thirty-two frames and three crisp stills, then the rest of the reel fills in
-  // behind the scroll: painting the film progressively is worth far more to
-  // how fast the page feels than holding a curtain until everything lands.
+  // The gate is a greeting, not a download screen, on a desktop where the
+  // stream can keep up. On a phone it waits until the frames are decoded:
+  // scrolling into a page that is still in flight is what feels stuck.
   const GATE_MIN_MS = 700;
-  const GATE_MAX_MS = 5000;
+  const GATE_MAX_MS = phoneFilm ? 15000 : 5000;
 
   function gatePlan() {
     const pages = [];
-    // Only the opening reel is frames now; the others are streams that start
-    // filling the moment the gate lifts, so preloading their pages would be
-    // wasted bytes.
     const hero = order[0];
-    // Five pages is eighty frames, three screens of film: enough that the
-    // opening scroll never reaches the edge of what is ready, and 280 KB
-    // instead of 560 KB, which is what the gate's own duration costs.
-    const total = Math.min(GATE_PAGES, pageCount(hero));
+    // Phone: the whole opening reel, decoded, before the curtain lifts.
+    // Desktop: the first two pages, then the stream takes over.
+    const total = phoneFilm ? pageCount(hero) : Math.min(GATE_PAGES, pageCount(hero));
     for (let page = 0; page < total; page += 1) pages.push(pageKey(hero, page));
     const crispKeys = [];
-    const head = Math.min(6, countOf(hero));
-    for (let index = 0; index < head; index += 2) crispKeys.push(manager.key(hero, index));
+    const head = Math.min(phoneFilm ? 36 : 6, countOf(hero));
+    const stride = phoneFilm ? 1 : 2;
+    for (let index = 0; index < head; index += stride) crispKeys.push(manager.key(hero, index));
     return { pages, crispKeys };
   }
 
@@ -703,16 +1093,22 @@
       }
     };
 
+    const hero = order[0];
+    const phoneHead = Math.min(24, countOf(hero));
     const { pages, crispKeys } = gatePlan();
     manager.keep = new Set(order);
-    manager.focus(order[0], 0);
-    for (const key of pages) {
-      const cut = key.lastIndexOf("/");
-      wantPage(key.slice(0, cut), Number(key.slice(cut + 1)), 1);
-    }
-    for (const key of crispKeys) {
-      const cut = key.lastIndexOf("/");
-      manager.want(key.slice(0, cut), Number(key.slice(cut + 1)), 30);
+    manager.focus(hero, 0);
+    if (phoneFilm) {
+      for (let index = 0; index < phoneHead; index += 1) wantPhone(hero, index, index);
+    } else {
+      for (const key of pages) {
+        const cut = key.lastIndexOf("/");
+        wantPage(key.slice(0, cut), Number(key.slice(cut + 1)), 1);
+      }
+      for (const key of crispKeys) {
+        const cut = key.lastIndexOf("/");
+        manager.want(key.slice(0, cut), Number(key.slice(cut + 1)), 30);
+      }
     }
 
     if (overlay) {
@@ -722,10 +1118,12 @@
 
     const close = () => {
       manager.booted = true;
+      trimSheets();
       // Surfaced for ?debug=1 so the boot time can be read on a real phone.
       window.__psmGateMs = Math.round(performance.now());
       offPages();
       offCrisp();
+      offPhone();
       root.classList.remove("is-booting");
       if (overlay) {
         overlay.classList.add("is-done");
@@ -737,17 +1135,31 @@
       ready();
       scheduleRepaint();
     };
-    loadPosters();
+    if (!phoneFilm) loadPosters();
 
     let opened = false;
     let lastPercent = -1;
     const bootedAt = performance.now();
     const finish = () => {
       if (opened) return;
-      const pageShare = pageProgress(pages);
-      const crispShare = manager.progress(crispKeys);
-      const overall = (pageShare * pages.length + crispShare * crispKeys.length) / Math.max(1, pages.length + crispKeys.length);
-      const shownPercent = Math.round(overall * 100);
+      let shownPercent = 0;
+      let readyToOpen = false;
+      if (phoneFilm) {
+        let done = 0;
+        for (let index = 0; index < phoneHead; index += 1) {
+          const key = `${hero}/${index}`;
+          if (phoneReady.has(key) || phoneFailed.has(key)) done += 1;
+        }
+        const share = phoneHead ? done / phoneHead : 1;
+        shownPercent = Math.round(share * 100);
+        readyToOpen = share >= 1;
+      } else {
+        const pageShare = pageProgress(pages);
+        const crispShare = manager.progress(crispKeys);
+        const overall = (pageShare * pages.length + crispShare * crispKeys.length) / Math.max(1, pages.length + crispKeys.length);
+        shownPercent = Math.round(overall * 100);
+        readyToOpen = pageShare >= 1 && crispShare >= 0.5;
+      }
       // Repainting the gate is not free on a throttled phone: only touch the
       // DOM when the number actually changes.
       if (shownPercent !== lastPercent) {
@@ -755,7 +1167,7 @@
         if (bar) bar.style.width = `${shownPercent}%`;
         if (percent) percent.textContent = `${shownPercent}%`;
       }
-      if (pageShare < 1 || crispShare < 0.5) return;
+      if (!readyToOpen) return;
       if (performance.now() - bootedAt < GATE_MIN_MS) {
         setTimeout(finish, GATE_MIN_MS);
         return;
@@ -765,8 +1177,9 @@
       startBackground();
     };
 
-    const offPages = onPage(finish);
-    const offCrisp = manager.onChange(finish);
+    const offPages = phoneFilm ? () => {} : onPage(finish);
+    const offCrisp = phoneFilm ? () => {} : manager.onChange(finish);
+    const offPhone = phoneFilm ? onPhone(finish) : () => {};
     finish();
     // Never trap the visitor behind a slow network.
     setTimeout(() => {
@@ -781,6 +1194,14 @@
   // the crisp frames of the opening reel.
   function startBackground() {
     const hero = order[0];
+    if (phoneFilm) {
+      for (const id of order) {
+        const count = countOf(id);
+        const priority = id === hero ? 8 : 80;
+        for (let index = 0; index < count; index += 1) wantPhone(id, index, priority);
+      }
+      return;
+    }
     fillReel(hero, 400);
     const total = countOf(hero);
     for (let index = 0; index < Math.min(total, 24); index += 1) manager.want(hero, index, 500 + index);
@@ -833,7 +1254,8 @@
     setInterval(() => {
       const state = window.PSMFilm.debug();
       panel.textContent = [
-        `tier ${state.tier} booted ${window.PSMFilm.booted}`,
+        `tier ${state.tier} booted ${window.PSMFilm.booted} phone ${phoneFilm}`,
+        `img ${phoneReady.size} fail ${phoneFailed.size} q ${phoneQueue.length} act ${phoneActive}`,
         `pages ${pageDone.size}/${totalPages()} dec ${sheets.size} q ${pageQueue.length} act ${pageActive}`,
         `crisp ${state.loaded} dec ${state.decoded} q ${state.queued}`,
         `paint ${JSON.stringify(state.painted)}`,
@@ -854,8 +1276,10 @@
   window.PSMFilm = {
     init,
     scrub,
+    prepare,
     still,
     prewarm,
+    staging,
     manager,
     get booted() {
       return manager.booted;

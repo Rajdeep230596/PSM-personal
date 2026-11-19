@@ -116,11 +116,32 @@
 
 .hero-copy h1 {
   margin: 0;
-  font-family: var(--serif);
+  font-family: var(--display);
   font-weight: 500;
   font-size: clamp(1.9rem, 7.4vw, 3.3rem);
   line-height: 1.05;
   letter-spacing: 0.005em;
-  color: var(--ivory);
-  text-shadow: 0 2px 34px rgba(0, 0, 0, 0.5);
+  color: var(--gold);
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* Landscape keeps the introduction at the foot of the reel, one word a line. */
+@media (orientation: landscape) {
+  .hero-copy {
+    top: auto;
+    bottom: max(1.6rem, env(safe-area-inset-bottom));
+  }
+
+  .hero-copy h1 span {
+    display: block;
+  }
+}
+
+html.force-landscape .hero-copy {
+  top: auto;
+  bottom: max(1.6rem, env(safe-area-inset-bottom));
+}
+
+html.force-landscape .hero-copy h1 span {
+  display: block;
 }

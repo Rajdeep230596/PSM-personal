@@ -8,7 +8,8 @@
   --line: rgba(244, 239, 230, 0.16);
   --sheet: #12110f;
   --serif: "Cormorant Garamond", "Times New Roman", serif;
-  --sans: "Outfit", "Segoe UI", sans-serif;
+  --display: "Bodoni Moda", "Times New Roman", serif;
+  --sans: "Bona Nova", "Times New Roman", serif;
   --nav: 5.2rem;
   --screen-w: 100%;
   --screen-h: 100vh;
@@ -32,11 +33,27 @@
 }
 
 @font-face {
-  font-family: "Outfit";
+  font-family: "Bodoni Moda";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("assets/fonts/bodoni-moda-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Bona Nova";
   font-style: normal;
   font-weight: 300 500;
   font-display: swap;
-  src: url("assets/fonts/outfit.woff2") format("woff2");
+  src: url("assets/fonts/bona-nova-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Bona Nova";
+  font-style: italic;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("assets/fonts/bona-nova-italic.woff2") format("woff2");
 }
 
 * {
@@ -45,7 +62,7 @@
 
 html {
   scroll-behavior: auto;
-  overflow: clip;
+  overflow: hidden;
   height: 100%;
   width: 100%;
   background: #000;
@@ -55,21 +72,21 @@ body {
   margin: 0;
   height: 100%;
   width: 100%;
-  overflow: clip;
+  overflow: hidden;
   background: #000;
   color: var(--ivory);
   font-family: var(--sans);
   font-weight: 300;
   line-height: 1.6;
   /* iOS renders light type on black with a heavier, fuzzier stroke than macOS
-     and Android; grayscale smoothing keeps the serif hairlines crisp. */
+     and Android; grayscale smoothing keeps the fine strokes crisp. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
 #screen {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-weight: 500;
 }
 
@@ -79,7 +96,7 @@ body {
   width: var(--screen-w);
   height: var(--screen-h);
   margin: 0;
-  overflow: clip;
+  overflow: hidden;
   background: var(--ink);
 }
 
@@ -87,11 +104,13 @@ body {
   position: relative;
   z-index: 1;
   height: var(--screen-h);
-  overflow-x: clip;
-  overflow-y: auto;
+  /* clip on one axis drops scroll events on iOS, so the film never leaves frame 1 */
+  overflow-x: hidden;
+  overflow-y: scroll;
   scroll-behavior: auto;
   overscroll-behavior: none;
   overflow-anchor: none;
+  touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -417,11 +436,12 @@ button:focus-visible {
 h1,
 h2,
 h3 {
-  font-family: var(--serif);
+  font-family: var(--display);
   font-weight: 500;
   letter-spacing: -0.02em;
   line-height: 0.95;
   margin: 0;
+  text-transform: uppercase;
 }
 
 h1 {
@@ -960,7 +980,7 @@ h2 {
 }
 
 .motto {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-style: italic;
   font-size: 1.6rem;
   color: var(--ivory);
@@ -986,7 +1006,7 @@ h2 {
 }
 
 .timeline strong {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 1.7rem;
   font-weight: 500;
 }
@@ -1493,7 +1513,7 @@ h2 {
 }
 
 @media (max-width: 899px) and (orientation: portrait) {
-  html:not(.force-landscape) .shot-sticky {
+  html:not(.force-landscape):not(.has-film-stage) .shot-sticky {
     background: #000;
   }
 
@@ -1549,7 +1569,6 @@ h2 {
 .enter-house {
   margin: 0;
   max-width: 12ch;
-  font-family: var(--serif);
   font-weight: 500;
   font-size: clamp(3rem, 6.2vw, 6.4rem);
   line-height: 1.05;
@@ -1618,8 +1637,10 @@ h2 {
   text-transform: uppercase;
   border-bottom: 1px solid var(--gold);
   padding-bottom: 0.2rem;
-  font-size: clamp(2.6rem, 5vw, 5rem);
-  letter-spacing: 0.08em;
+  font-family: var(--display);
+  font-size: clamp(2.08rem, 4vw, 4rem);
+  line-height: 0.95;
+  letter-spacing: -0.02em;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.45s ease;
@@ -1794,14 +1815,14 @@ h2 {
   pointer-events: none;
 }
 
-#shot-1 .shot-video,
-#shot-2 .shot-video,
-#shot-3 .shot-video,
-#shot-4 .shot-video {
+#shot-1 img.shot-video,
+#shot-2 img.shot-video,
+#shot-3 img.shot-video,
+#shot-4 img.shot-video {
   filter: url("#shot1-blacks");
 }
 
-#shot-3.is-cabin .shot-video {
+#shot-3.is-cabin img.shot-video {
   filter: url("#shot3-cabin");
 }
 
@@ -1931,6 +1952,36 @@ h2 {
   margin: 0.2rem 0 0;
   font-size: clamp(1.6rem, 3vw, 2.4rem);
   color: var(--ivory-dim);
+}
+
+.intro-title {
+  max-width: none;
+}
+
+.intro-welcome,
+.intro-name {
+  display: block;
+}
+
+.intro-welcome {
+  font-size: 0.7em;
+}
+
+.intro-name {
+  white-space: nowrap;
+  font-size: min(1em, 12vw);
+}
+
+.intro-lead {
+  font-size: clamp(1.28rem, 2.4vw, 1.92rem);
+}
+
+.interlude-promise > h2 {
+  font-size: clamp(1.8rem, 3.72vw, 3.84rem);
+}
+
+.interlude-promise .interlude-lead {
+  font-size: clamp(0.96rem, 1.8vw, 1.44rem);
 }
 
 .interlude-services,
@@ -2079,7 +2130,7 @@ html.is-booting .scroller {
 
 .boot-welcome {
   margin: 1.25rem 0 0.35rem;
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-weight: 500;
   font-size: clamp(1.35rem, 4.6vw, 1.85rem);
   letter-spacing: 0.01em;
@@ -2119,9 +2170,35 @@ html.is-booting .scroller {
   font-variant-numeric: tabular-nums;
 }
 
-/* The canvas paints above the poster and takes over once it has a frame. */
+/* The canvas paints above the poster and takes over once it has a frame.
+   A CSS filter on the canvas freezes that first paint on iOS, so the filter
+   stays on the poster only. */
 .shot-frame {
   z-index: 1;
+  filter: none;
+}
+
+/* Phone films are drawn here, over the picture band and above the scroller.
+   A canvas behind the scrolling layer is invisible on iOS, so hiding the
+   poster left a black panel. The poster stays underneath as the fallback. */
+.film-stage {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  object-fit: contain;
+  background: transparent;
+}
+
+.film-stage[hidden] {
+  display: none;
+}
+
+img.film-stage.is-shot1-grade {
+  filter: url("#shot-crisp");
+}
+
+html.has-film-stage canvas.shot-frame {
+  visibility: hidden;
 }
 
 .shot-sticky img.shot-video[data-covered="1"] {

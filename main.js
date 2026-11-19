@@ -281,6 +281,12 @@ function holdFilm(picture, section, active) {
     activeReel = id;
     activeIndex = index;
   }
+  // One stage canvas shows the reel under the finger. The others only queue
+  // their pages so a later paint cannot replace the picture on screen.
+  if (!active && window.PSMFilm.staging()) {
+    window.PSMFilm.prepare(id, index);
+    return;
+  }
   window.PSMFilm.scrub(id, index);
 }
 
@@ -315,8 +321,14 @@ function paintFilms() {
       focus = pair[0];
     }
   });
-  films.forEach(([picture, section]) => holdFilm(picture, section, picture === focus));
-  if (focus) prewarmNext(focus);
+  films.forEach(([picture, section]) => {
+    if (picture !== focus) holdFilm(picture, section, false);
+  });
+  if (focus) {
+    const focusSection = films.find((pair) => pair[0] === focus)[1];
+    holdFilm(focus, focusSection, true);
+    prewarmNext(focus);
+  }
 }
 
 function applyScrub(video) {
@@ -371,18 +383,20 @@ function layoutFilms() {
   });
 }
 
-function onScroll() {
-  if (scrollTick) return;
-  scrollTick = requestAnimationFrame(() => {
-    scrollTick = 0;
-    const top = scroller.scrollTop;
-    if (Math.abs(top - lastScrollTop) > 1) {
-      scrollDirection = top > lastScrollTop ? 1 : -1;
-      hasScrolled = true;
-    }
-    lastScrollTop = top;
-    render();
-  });
+function syncScroll() {
+  const top = scroller.scrollTop;
+  if (Math.abs(top - lastScrollTop) < 0.5) return;
+  scrollDirection = top > lastScrollTop ? 1 : -1;
+  hasScrolled = true;
+  lastScrollTop = top;
+  render();
+}
+
+// iOS delivers scroll events late, or not at all, while a finger is down on an
+// overflow div. Reading scrollTop every frame is what lets the film keep up.
+function followScroll() {
+  scrollTick = requestAnimationFrame(followScroll);
+  syncScroll();
 }
 
 function jumpTo(hash) {
@@ -390,7 +404,9 @@ function jumpTo(hash) {
   if (target) scroller.scrollTop = target.offsetTop;
 }
 
-scroller.addEventListener("scroll", onScroll, { passive: true });
+scroller.addEventListener("scroll", syncScroll, { passive: true });
+scroller.addEventListener("touchmove", syncScroll, { passive: true });
+followScroll();
 window.addEventListener("resize", () => {
   fitScreen();
   render();
