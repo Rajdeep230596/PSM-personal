@@ -310,7 +310,7 @@
       if (this.queue.length > 1) {
         this.queue.sort((a, b) => a.priority - b.priority || a.seq - b.seq);
       }
-      const slots = phoneFilm ? 6 : CONCURRENCY - SHEET_SLOTS;
+      const slots = phoneFilm ? 6 : CONCURRENCY - 2;
       while (this.active < slots && this.queue.length) {
         const job = this.queue.shift();
         this.queued.delete(job.key);
@@ -700,27 +700,6 @@
       data[i + 1] = GRADE_LUT[data[i + 1]];
       data[i + 2] = GRADE_LUT[data[i + 2]];
     }
-    // A light unsharp after the grade. The curve darkens the mids, and without
-    // this the jet, the crew and the car read as smoothed.
-    const src = new Uint8ClampedArray(data);
-    const amount = 0.72;
-    for (let y = 1; y < height - 1; y += 1) {
-      for (let x = 1; x < width - 1; x += 1) {
-        const i = (y * width + x) * 4;
-        const l = i - 4;
-        const r = i + 4;
-        const u = i - width * 4;
-        const d = i + width * 4;
-        for (let c = 0; c < 3; c += 1) {
-          const center = src[i + c];
-          const blur = (src[l + c] + src[r + c] + src[u + c] + src[d + c]) * 0.25;
-          let sharp = center + (center - blur) * amount;
-          if (sharp < 0) sharp = 0;
-          else if (sharp > 255) sharp = 255;
-          data[i + c] = sharp;
-        }
-      }
-    }
     context.putImageData(image, 0, 0);
     gradeCache.set(bitmap, copy);
     return copy;
@@ -816,11 +795,10 @@
     return draw(id, bitmap, col * SHEET_W, row * SHEET_H, SHEET_W, SHEET_H);
   }
 
-  function paint(id, index, distance) {
-    // A full-size frame wins whenever it is the moment on screen. The sprite
-    // sheet only covers the gap while that frame is still decoding, so the
-    // film stays sharp instead of sitting on the 320px cell.
-    const crisp = manager.nearest(id, index, GRADED[id] ? 6 : 2);
+  function paint(id, index) {
+    // Full frames only. The 320px sheet, scaled to the screen, is the blur,
+    // and replacing it with the real frame a moment later is the flicker.
+    const crisp = manager.nearest(id, index, 4);
     if (crisp) {
       const mark = `c:${crisp.index}`;
       if (painted.get(id) === mark) return true;
@@ -830,47 +808,7 @@
         return true;
       }
     }
-    // A soft 320px cell reads as video smoothing on the subjects. Hold the
-    // last crisp frame for a short gap rather than swapping it in.
-    if (GRADED[id] && String(painted.get(id) || "").startsWith("c:")) {
-      const held = shown.get(id);
-      if (held !== undefined && Math.abs(held - index) <= 16) {
-        if (staging()) placeStage(id);
-        return true;
-      }
-    }
-    const page = Math.floor(index / SHEET_CELLS);
-    const cell = index % SHEET_CELLS;
-    const exact = pageBitmap(pageKey(id, page));
-    if (exact) {
-      const mark = `s:${page}:${cell}`;
-      if (painted.get(id) === mark) return true;
-      if (drawSheetCell(id, exact, index, cell)) {
-        painted.set(id, mark);
-        shown.set(id, index);
-        return true;
-      }
-    }
-    // One page either side can stand in while its neighbour decodes. Further
-    // away than that, hold the frame already on screen instead of snapping
-    // back to the poster.
-    let best = -1;
-    for (const key of sheets.keys()) {
-      if (!key.startsWith(`${id}/`)) continue;
-      const pageIndex = Number(key.slice(key.lastIndexOf("/") + 1));
-      if (best < 0 || Math.abs(pageIndex - page) < Math.abs(best - page)) best = pageIndex;
-    }
-    if (best >= 0 && Math.abs(best - page) <= 1) {
-      const near = sheets.get(pageKey(id, best));
-      const nearCell = Math.min(Math.max(index - best * SHEET_CELLS, 0), SHEET_CELLS - 1);
-      const mark = `s:${best}:${nearCell}`;
-      if (painted.get(id) === mark) return true;
-      if (near && drawSheetCell(id, near, index, nearCell)) {
-        painted.set(id, mark);
-        shown.set(id, best * SHEET_CELLS + nearCell);
-        return true;
-      }
-    } else if (painted.has(id)) {
+    if (painted.has(id)) {
       if (staging()) placeStage(id);
       return true;
     }
@@ -912,13 +850,6 @@
     }
     manager.focus(id, index);
     const total = countOf(id);
-    const page = Math.floor(index / SHEET_CELLS);
-    // Never scroll onto a frame whose page has not been asked for.
-    wantPage(id, page, 6);
-    wantPage(id, page + 1, 9);
-    wantPage(id, page - 1, 9);
-    pageBitmap(pageKey(id, page));
-    pageBitmap(pageKey(id, page + 1));
     const previous = Number.isFinite(shown.get(id)) ? shown.get(id) : index;
     const forward = index >= previous;
     for (let step = 0; step <= (forward ? RUNWAY_AHEAD : RUNWAY_BEHIND); step += 1) {
@@ -1039,8 +970,8 @@
   // The gate is a greeting, not a download screen, on a desktop where the
   // stream can keep up. On a phone it waits until the frames are decoded:
   // scrolling into a page that is still in flight is what feels stuck.
-  const GATE_MIN_MS = 700;
-  const GATE_MAX_MS = phoneFilm ? 15000 : 5000;
+  const GATE_MIN_MS = 250;
+  const GATE_MAX_MS = phoneFilm ? 1200 : 700;
 
   function gatePlan() {
     const pages = [];
@@ -1094,20 +1025,17 @@
     };
 
     const hero = order[0];
-    const phoneHead = Math.min(24, countOf(hero));
+    const phoneHead = Math.min(6, countOf(hero));
     const { pages, crispKeys } = gatePlan();
     manager.keep = new Set(order);
     manager.focus(hero, 0);
+    if (!phoneFilm) loadPosters();
     if (phoneFilm) {
       for (let index = 0; index < phoneHead; index += 1) wantPhone(hero, index, index);
     } else {
-      for (const key of pages) {
-        const cut = key.lastIndexOf("/");
-        wantPage(key.slice(0, cut), Number(key.slice(cut + 1)), 1);
-      }
       for (const key of crispKeys) {
         const cut = key.lastIndexOf("/");
-        manager.want(key.slice(0, cut), Number(key.slice(cut + 1)), 30);
+        manager.want(key.slice(0, cut), Number(key.slice(cut + 1)), 1);
       }
     }
 
@@ -1130,12 +1058,11 @@
         setTimeout(() => {
           overlay.hidden = true;
           overlay.remove();
-        }, 900);
+        }, 320);
       }
       ready();
       scheduleRepaint();
     };
-    if (!phoneFilm) loadPosters();
 
     let opened = false;
     let lastPercent = -1;
@@ -1152,13 +1079,10 @@
         }
         const share = phoneHead ? done / phoneHead : 1;
         shownPercent = Math.round(share * 100);
-        readyToOpen = share >= 1;
+        readyToOpen = done >= 2 || stills.has(hero);
       } else {
-        const pageShare = pageProgress(pages);
-        const crispShare = manager.progress(crispKeys);
-        const overall = (pageShare * pages.length + crispShare * crispKeys.length) / Math.max(1, pages.length + crispKeys.length);
-        shownPercent = Math.round(overall * 100);
-        readyToOpen = pageShare >= 1 && crispShare >= 0.5;
+        shownPercent = 100;
+        readyToOpen = true;
       }
       // Repainting the gate is not free on a throttled phone: only touch the
       // DOM when the number actually changes.
@@ -1202,9 +1126,8 @@
       }
       return;
     }
-    fillReel(hero, 400);
     const total = countOf(hero);
-    for (let index = 0; index < Math.min(total, 24); index += 1) manager.want(hero, index, 500 + index);
+    for (let index = 0; index < total; index += 1) manager.want(hero, index, 40 + index);
     // Everything after the opening reel is one stream each. Nothing is spent
     // on them until the visitor moves: 3.5 MB of film that nobody has asked
     // for is a cost, not a feature.

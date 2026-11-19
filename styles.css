@@ -2096,7 +2096,7 @@ html.is-booting .scroller {
     max(1.5rem, env(safe-area-inset-left));
   background: radial-gradient(120% 90% at 50% 0%, #131417 0%, #0a0a0b 42%, #050505 100%);
   opacity: 1;
-  transition: opacity 700ms ease, transform 700ms ease;
+  transition: opacity 280ms ease, transform 280ms ease;
 }
 
 .boot[hidden] {
