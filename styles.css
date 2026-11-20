@@ -66,6 +66,9 @@ html {
   height: 100%;
   width: 100%;
   background: #000;
+  /* iOS enlarges type when a phone turns sideways. Keep the set sizes. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -1185,7 +1188,7 @@ h2 {
   }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 980px) {
   .nav-toggle {
     display: inline-flex;
   }
@@ -1512,12 +1515,30 @@ h2 {
   overflow: hidden;
 }
 
-@media (max-width: 899px) and (orientation: portrait) {
-  html:not(.force-landscape):not(.has-film-stage) .shot-sticky {
+/* Phones, iPads and MacBooks are not 16:9. A cover fit on those screens
+   cuts the frame, so the picture stays the full landscape image. */
+@media (max-aspect-ratio: 16/10), (min-aspect-ratio: 19/10) {
+  html:not(.force-landscape) .shot-sticky {
     background: #000;
   }
 
+  /* The reel is 16:9. A full-height box with cover keeps only the centre
+     and cuts the rest of the frame, so the picture itself is that 16:9 band. */
   html:not(.force-landscape) .shot-sticky .shot-video {
+    left: 50%;
+    right: auto;
+    top: 50%;
+    bottom: auto;
+    width: min(100%, calc(var(--screen-h) * 16 / 9));
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: 100%;
+    transform: translate(-50%, -50%);
+    object-fit: contain;
+    object-position: center center;
+  }
+
+  html:not(.force-landscape) .film-stage {
     object-fit: contain;
   }
 }
@@ -1815,7 +1836,6 @@ h2 {
   pointer-events: none;
 }
 
-#shot-1 img.shot-video,
 #shot-2 img.shot-video,
 #shot-3 img.shot-video,
 #shot-4 img.shot-video {

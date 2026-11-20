@@ -35,7 +35,12 @@
   // Phones scrub from sprite pages. iOS will not present a canvas that lives
   // inside position: sticky, and it will not show a new video frame from a seek,
   // so both of those paths stay on the opening picture.
-  const phoneFilm = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+  // iPhone and iPad, including an iPad with a keyboard. iPadOS reports itself
+  // as a Mac, so the touch points are what still mark it as an iPad. A MacBook
+  // has none, and it can paint the canvas, so it keeps that path.
+  const appleTouch = /iPhone|iPad|iPod/.test(navigator.userAgent || "")
+    || ((navigator.maxTouchPoints || 0) > 1 && /Macintosh/.test(navigator.userAgent || ""));
+  const phoneFilm = appleTouch || window.matchMedia("(hover: none) and (pointer: coarse)").matches;
   const RUNWAY_AHEAD = 24;
   const RUNWAY_BEHIND = 10;
   const SHOW_GAP = 20;
@@ -653,7 +658,18 @@
     return canvas || null;
   }
 
+  function fullFrame() {
+    if (document.documentElement.classList.contains("force-landscape")) return false;
+    const width = window.innerWidth || 1;
+    const height = window.innerHeight || 1;
+    const ratio = width / height;
+    // Taller than a MacBook, or wider than an iPhone on its side.
+    return ratio <= 16 / 10 || ratio >= 19 / 10;
+  }
+
   function fitOf(id) {
+    // These screens are not 16:9. Cover would cut the jet, the crew and the car.
+    if (fullFrame()) return "contain";
     if (fits.has(id)) return fits.get(id);
     const picture = document.querySelector(`#${id} img.shot-video`);
     if (!picture) return "cover";
@@ -833,9 +849,11 @@
       presentPhone(id, index);
       if (id !== activeReel) {
         activeReel = id;
+        const total = countOf(id);
+        for (let frame = 0; frame < total; frame += 1) wantPhone(id, frame, 20 + frame);
         const next = order[order.indexOf(id) + 1];
-        const head = next ? Math.min(12, countOf(next)) : 0;
-        for (let frame = 0; frame < head; frame += 1) wantPhone(next, frame, 30 + frame);
+        const head = next ? Math.min(24, countOf(next)) : 0;
+        for (let frame = 0; frame < head; frame += 1) wantPhone(next, frame, 60 + frame);
       }
       return;
     }
@@ -858,12 +876,13 @@
       if (ahead >= 0 && ahead < total) manager.want(id, ahead, 1 + step);
       if (step && behind >= 0 && behind < total) manager.want(id, behind, 3 + step);
     }
-    // Crossing into a reel pulls the next one in fully, as asked: at reel 2 the
-    // third reel completes, at reel 3 the fourth does.
+    // The next reel gets a short run of full frames. Sprite sheets are not
+    // drawn, and asking for them here only delays the frame on screen.
     if (id !== activeReel) {
       activeReel = id;
       const next = order[order.indexOf(id) + 1];
-      if (next) fillReel(next, 14);
+      const head = next ? Math.min(24, countOf(next)) : 0;
+      for (let frame = 0; frame < head; frame += 1) manager.want(next, frame, 30 + frame);
     }
     paint(id, index, SHOW_GAP + 40);
   }
@@ -877,11 +896,9 @@
       wantPhone(id, index - 1, 14);
       return;
     }
-    const page = Math.floor(index / SHEET_CELLS);
-    wantPage(id, page, 12);
-    wantPage(id, page + 1, 16);
-    wantPage(id, page - 1, 18);
-    pageBitmap(pageKey(id, page));
+    manager.want(id, index, 12);
+    manager.want(id, index + 1, 13);
+    manager.want(id, index - 1, 14);
   }
 
   function fillReel(id, priority = 40) {
@@ -897,7 +914,6 @@
     }
     manager.focus(id, 0);
     manager.want(id, 0, 1);
-    wantPage(id, 0, 1);
     paint(id, 0, 60);
   }
 
@@ -909,9 +925,8 @@
       for (let index = 0; index < head; index += 1) wantPhone(next, index, 12 + index);
       return;
     }
-    const video = videoFor(next);
-    if (video) return;
-    fillReel(next, 30);
+    const head = Math.min(24, countOf(next));
+    for (let frame = 0; frame < head; frame += 1) manager.want(next, frame, 30 + frame);
   }
 
   // ------------------------------------------------------------------ video
@@ -1119,11 +1134,8 @@
   function startBackground() {
     const hero = order[0];
     if (phoneFilm) {
-      for (const id of order) {
-        const count = countOf(id);
-        const priority = id === hero ? 8 : 80;
-        for (let index = 0; index < count; index += 1) wantPhone(id, index, priority);
-      }
+      const count = countOf(hero);
+      for (let index = 0; index < count; index += 1) wantPhone(hero, index, 8);
       return;
     }
     const total = countOf(hero);

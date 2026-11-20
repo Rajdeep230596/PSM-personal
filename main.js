@@ -240,9 +240,15 @@ function pickTier() {
   const connection = navigator.connection;
   if (connection && connection.saveData) return TIER_PHONE;
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
-  const need = Math.round((window.innerWidth || 390) * dpr * 0.85);
-  if (need <= 720) return TIER_PHONE;
-  if (need <= 1080) return TIER_RETINA_PHONE;
+  const width = window.innerWidth || 390;
+  const height = window.innerHeight || 844;
+  const ratio = width / Math.max(1, height);
+  const css = ratio > 16 / 9 ? height * (16 / 9) : width;
+  const need = Math.round(css * dpr);
+  // The next size up is only worth the download once this one would be
+  // scaled by more than about 15 percent.
+  if (need <= 828) return TIER_PHONE;
+  if (need <= 1242) return TIER_RETINA_PHONE;
   return TIER_WIDE;
 }
 
