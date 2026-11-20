@@ -168,6 +168,7 @@ function render() {
   const max = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
   progressBar.style.width = `${(scroller.scrollTop / max) * 100}%`;
   nav.classList.toggle("is-solid", scroller.scrollTop > shot1.offsetTop + scroller.clientHeight * 0.72);
+  releaseFilms();
   if (reduceMotion) {
     paintStills();
     return;
@@ -312,6 +313,20 @@ function paintStills() {
 
 function prewarmNext(picture) {
   window.PSMFilm.prewarm(picture.dataset.reel);
+}
+
+function releaseFilms() {
+  // Each film belongs to its own section. Do not pin or shift it onto the
+  // next one — that is what stacked the separate shots on top of each other.
+  films.forEach(([, section]) => {
+    const sticky = section.querySelector(".shot-sticky");
+    if (!sticky) return;
+    if (sticky.dataset.hold) {
+      sticky.dataset.hold = "";
+      sticky.style.transform = "";
+    }
+    sticky.classList.remove("is-pinned", "is-held");
+  });
 }
 
 function paintFilms() {

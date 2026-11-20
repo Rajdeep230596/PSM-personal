@@ -1554,6 +1554,13 @@ h2 {
   overflow: hidden;
 }
 
+/* The last screen of a shot is where the sticky lets go and the picture
+   travels with the page. Hide it instead of pinning with position:fixed,
+   which covers the scroller and swallows the wheel. */
+.shot-sticky.is-held {
+  visibility: hidden;
+}
+
 .shot-video {
   position: absolute;
   inset: 0;
@@ -2203,7 +2210,7 @@ html.is-booting .scroller {
    poster left a black panel. The poster stays underneath as the fallback. */
 .film-stage {
   position: absolute;
-  z-index: 6;
+  z-index: 1;
   pointer-events: none;
   object-fit: contain;
   background: transparent;

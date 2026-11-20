@@ -141,7 +141,9 @@
 
   function nearestPhone(id, index) {
     const total = countOf(id);
-    for (let delta = 0; delta <= 6; delta += 1) {
+    // The closest frame already in memory. Stopping at a few frames either
+    // side is what left the picture frozen while the page kept moving.
+    for (let delta = 0; delta < total; delta += 1) {
       const ahead = index + delta;
       const behind = index - delta;
       if (ahead < total && phoneReady.has(`${id}/${ahead}`)) return ahead;
@@ -158,7 +160,7 @@
       const image = document.createElement("img");
       image.className = "film-stage";
       image.alt = "";
-      image.decoding = "async";
+      image.decoding = "auto";
       // visibility, not display:none. iOS will not load an image that is
       // display:none, which would leave the film on the poster forever.
       image.style.visibility = "hidden";
@@ -167,6 +169,14 @@
     };
     stageFront = make();
     stageBack = make();
+  }
+
+  let stageBusy = false;
+  let stageWant = "";
+
+  function coverPoster(id) {
+    const poster = document.querySelector(`#${id} img.shot-video`);
+    if (poster) poster.dataset.covered = "1";
   }
 
   function presentPhone(id, index) {
@@ -178,45 +188,106 @@
       if (index + step < total) wantPhone(id, index + step, step);
       if (step && index - step >= 0) wantPhone(id, index - step, 6 + step);
     }
-    const frame = nearestPhone(id, index);
+    let frame = nearestPhone(id, index);
     if (frame < 0) return;
+    const currentMark = stageFront.dataset.shown || "";
+    const currentCut = currentMark.lastIndexOf("/");
+    const currentIndex = currentCut > 0 && currentMark.slice(0, currentCut) === id ? Number(currentMark.slice(currentCut + 1)) : NaN;
+    // A frame already on screen that is closer to the scroll than anything
+    // downloaded stays there. Replacing it with an older frame is a jump.
+    if (Number.isFinite(currentIndex) && Math.abs(currentIndex - index) <= Math.abs(frame - index)) frame = currentIndex;
     markGrade(id);
     const url = crispUrl(id, frame);
-    const mark = `i:${frame}`;
-    if (painted.get(id) === mark) {
-      if (placeStage(id)) stageFront.style.visibility = "visible";
+    const mark = `${id}/${frame}`;
+    stageWant = mark;
+    // The frame already on the glass stays there. Hiding it before the next
+    // one has decoded is what lets the opening still flash through.
+    if (stageFront.dataset.shown === mark) {
+      if (placeStage(id)) {
+        stageFront.style.visibility = "visible";
+        if (!stageBusy) stageBack.style.visibility = "hidden";
+        coverPoster(id);
+      }
       return;
     }
+    if (stageBusy) return;
     const absolute = new URL(url, document.baseURI).href;
     if (stageBack.dataset.pending === absolute) return;
     stageBack.dataset.pending = absolute;
+    stageBusy = true;
     const token = String(++stageToken);
     stageBack.dataset.token = token;
+    const finish = () => {
+      stageBusy = false;
+      if (!stageWant || stageWant === (stageFront && stageFront.dataset.shown)) return;
+      const cut = stageWant.lastIndexOf("/");
+      presentPhone(stageWant.slice(0, cut), Number(stageWant.slice(cut + 1)));
+    };
     const reveal = () => {
-      if (stageBack.dataset.token !== token || !stageBack.naturalWidth) return;
-      if (!placeStage(id)) {
-        stageBack.dataset.pending = "";
+      if (stageBack.dataset.token !== token || !stageBack.naturalWidth) {
+        stageBusy = false;
         return;
       }
+      if (!placeStage(id)) {
+        stageBack.dataset.pending = "";
+        stageBusy = false;
+        return;
+      }
+      stageBack.dataset.shown = mark;
+      stageBack.dataset.reel = id;
+      stageBack.style.zIndex = "1";
+      stageFront.style.zIndex = "1";
       stageBack.style.visibility = "visible";
-      stageFront.style.visibility = "hidden";
-      const previous = stageFront;
-      stageFront = stageBack;
-      stageBack = previous;
-      stageBack.dataset.pending = "";
-      painted.set(id, mark);
-      shown.set(id, frame);
+      coverPoster(id);
       document.documentElement.classList.add("has-film-stage");
+      const incoming = stageBack;
+      const outgoing = stageFront;
+      // iOS pauses animation frames while a finger is down, and decode() on a
+      // hidden image can fail to settle. Either one would leave the picture
+      // stuck, so the handoff also runs from a short timer.
+      let handed = false;
+      const handoff = () => {
+        if (handed) return;
+        handed = true;
+        if (incoming.dataset.token !== token) {
+          finish();
+          return;
+        }
+        outgoing.style.visibility = "hidden";
+        outgoing.style.zIndex = "1";
+        stageFront = incoming;
+        stageBack = outgoing;
+        stageBack.dataset.pending = "";
+        stageBack.style.zIndex = "1";
+        painted.set(id, mark);
+        shown.set(id, frame);
+        finish();
+      };
+      requestAnimationFrame(handoff);
+      window.setTimeout(handoff, 64);
     };
-    stageBack.onload = reveal;
+    const ready = () => {
+      if (stageBack.dataset.token !== token) return;
+      let started = false;
+      const start = () => {
+        if (started || stageBack.dataset.token !== token) return;
+        started = true;
+        reveal();
+      };
+      if (typeof stageBack.decode === "function") stageBack.decode().then(start, start);
+      else start();
+      window.setTimeout(start, 100);
+    };
+    stageBack.onload = ready;
     stageBack.onerror = () => {
       stageBack.dataset.pending = "";
+      stageBusy = false;
     };
     if (stageBack.src === absolute && stageBack.complete && stageBack.naturalWidth) {
-      reveal();
+      ready();
       return;
     }
-    stageBack.src = url;
+    stageBack.src = absolute;
   }
 
   function countOf(id) {
@@ -625,25 +696,45 @@
     };
   }
 
+  let stageMiss = 0;
+  let stageMissId = "";
+
   function placeStage(id) {
     const nodes = [stageFront, stageBack, stageCanvas].filter(Boolean);
     const sticky = document.querySelector(`#${id} .shot-sticky`);
     const host = document.getElementById("screen");
     if (!nodes.length || !sticky || !host) return false;
     const hostRect = host.getBoundingClientRect();
-    const band = filmBand(sticky.getBoundingClientRect());
-    const visible = band.width > 8 && band.height > 8 && band.top + band.height > hostRect.top + 4 && band.top < hostRect.bottom - 4;
+    const stickyRect = sticky.getBoundingClientRect();
+    const visible = stickyRect.width > 8 && stickyRect.height > 8 && stickyRect.bottom > hostRect.top + 4 && stickyRect.top < hostRect.bottom - 4;
+    if (id !== stageMissId) {
+      stageMissId = id;
+      stageMiss = 0;
+    }
     if (!visible) {
+      // One bad measurement must not lift the picture and uncover the still
+      // underneath. That lift, every other frame, is the flicker.
+      stageMiss += 1;
+      const showing = stageFront && stageFront.dataset.reel === id && stageFront.style.visibility !== "hidden";
+      if (showing && stageMiss < 4) return true;
       for (const node of nodes) node.style.visibility = "hidden";
       return false;
     }
+    stageMiss = 0;
+    // The picture lives inside this shot, under the shade and the captions.
+    // A layer on the screen itself covered the type and the next section.
     for (const node of nodes) {
-      node.style.left = `${band.left - hostRect.left}px`;
-      node.style.top = `${band.top - hostRect.top}px`;
+      if (node.parentElement !== sticky) sticky.appendChild(node);
+    }
+    const band = filmBand({ left: 0, top: 0, width: stickyRect.width, height: stickyRect.height });
+    for (const node of nodes) {
+      node.style.left = `${band.left}px`;
+      node.style.top = `${band.top}px`;
       node.style.width = `${band.width}px`;
       node.style.height = `${band.height}px`;
       node.style.right = "auto";
       node.style.bottom = "auto";
+      node.style.zIndex = "1";
     }
     return true;
   }
@@ -651,6 +742,8 @@
   function surface(id) {
     if (staging()) return ensureStage();
     document.documentElement.classList.remove("has-film-stage");
+    if (stageFront) stageFront.style.visibility = "hidden";
+    if (stageBack) stageBack.style.visibility = "hidden";
     if (stageCanvas) stageCanvas.hidden = true;
     if (canvases.has(id)) return canvases.get(id);
     const canvas = document.querySelector(`#${id} canvas.shot-frame`);
@@ -814,13 +907,19 @@
   function paint(id, index) {
     // Full frames only. The 320px sheet, scaled to the screen, is the blur,
     // and replacing it with the real frame a moment later is the flicker.
-    const crisp = manager.nearest(id, index, 4);
+    const crisp = manager.nearest(id, index, countOf(id));
+    const showing = shown.get(id);
+    if (crisp && Number.isFinite(showing) && Math.abs(showing - index) <= Math.abs(crisp.index - index)) {
+      if (staging()) placeStage(id);
+      return true;
+    }
     if (crisp) {
       const mark = `c:${crisp.index}`;
       if (painted.get(id) === mark) return true;
       if (draw(id, crisp.bitmap)) {
         painted.set(id, mark);
         shown.set(id, crisp.index);
+        coverPoster(id);
         return true;
       }
     }
