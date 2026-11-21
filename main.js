@@ -39,11 +39,15 @@ function rotatedNow() {
   return forceLandscape && view.height > view.width;
 }
 
+let laidW = 0;
+let laidH = 0;
+
 function fitScreen() {
   const view = viewportSize();
   const turned = forceLandscape && view.height > view.width;
   const fullW = turned ? view.height : view.width;
   const fullH = turned ? view.width : view.height;
+  const vv = window.visualViewport;
   document.documentElement.style.setProperty("--screen-w", `${fullW}px`);
   document.documentElement.style.setProperty("--screen-h", `${fullH}px`);
   screen.style.width = `${fullW}px`;
@@ -56,14 +60,22 @@ function fitScreen() {
     screen.style.transformOrigin = "top left";
     screen.style.transform = "rotate(90deg)";
   } else {
-    screen.style.top = "0";
-    screen.style.left = "0";
-    screen.style.right = "0";
-    screen.style.bottom = "0";
+    // Follow the visible window. A fixed screen pinned at top:0 stays under
+    // the Safari toolbar, which is what cut off the last lines on iPhone.
+    screen.style.top = vv ? `${vv.offsetTop}px` : "0";
+    screen.style.left = vv ? `${vv.offsetLeft}px` : "0";
+    screen.style.right = "auto";
+    screen.style.bottom = "auto";
     screen.style.transform = "none";
   }
   scroller.style.touchAction = turned ? "none" : "";
-  layoutFilms();
+  // The toolbar changes the height by a few dozen pixels. Rebuilding every
+  // film from that resize is what jumped the picture.
+  if (Math.abs(fullW - laidW) > 2 || Math.abs(fullH - laidH) > 140 || !laidH) {
+    laidW = fullW;
+    laidH = fullH;
+    layoutFilms();
+  }
 }
 
 function spanOf(section) {
@@ -428,15 +440,37 @@ function jumpTo(hash) {
 scroller.addEventListener("scroll", syncScroll, { passive: true });
 scroller.addEventListener("touchmove", syncScroll, { passive: true });
 followScroll();
+// iOS pauses animation frames for the whole time a finger is down, so the
+// film would otherwise sit still until the flick ended.
+let fingerDown = 0;
+function syncWhileTouching() {
+  if (!fingerDown) return;
+  syncScroll();
+  window.setTimeout(syncWhileTouching, 32);
+}
+scroller.addEventListener("touchstart", () => {
+  fingerDown += 1;
+  if (fingerDown === 1) syncWhileTouching();
+}, { passive: true });
+scroller.addEventListener("touchend", () => {
+  fingerDown = Math.max(0, fingerDown - 1);
+  syncScroll();
+}, { passive: true });
+scroller.addEventListener("touchcancel", () => {
+  fingerDown = 0;
+  syncScroll();
+}, { passive: true });
 window.addEventListener("resize", () => {
   fitScreen();
   render();
 });
 if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", () => {
+  const followViewport = () => {
     fitScreen();
     render();
-  });
+  };
+  window.visualViewport.addEventListener("resize", followViewport);
+  window.visualViewport.addEventListener("scroll", followViewport);
 }
 
 document.querySelectorAll(".nav-links a, .brand, .enter-house").forEach((link) => {

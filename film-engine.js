@@ -75,15 +75,29 @@
   const phoneFailed = new Set();
   const phoneQueued = new Set();
   const phoneQueue = [];
+  const phoneLive = new Map();
+  const phoneKept = [];
   const phoneListeners = new Set();
+  let phoneBin = null;
   let phoneActive = 0;
   let phoneSeq = 0;
   let phonePlay = { reel: "", index: 0 };
   let stageFront = null;
   let stageBack = null;
   let stageToken = 0;
-  const PHONE_SLOTS = 4;
+  const PHONE_SLOTS = 6;
   const PHONE_TIMEOUT_MS = 7000;
+
+  function phoneBinEl() {
+    if (phoneBin) return phoneBin;
+    // Off-screen, not display:none. iOS will not fetch an image that is
+    // display:none, and it will also drop a request that never joins the page.
+    phoneBin = document.createElement("div");
+    phoneBin.setAttribute("aria-hidden", "true");
+    phoneBin.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;pointer-events:none";
+    document.body.appendChild(phoneBin);
+    return phoneBin;
+  }
 
   function onPhone(listener) {
     phoneListeners.add(listener);
@@ -108,34 +122,64 @@
     while (phoneActive < PHONE_SLOTS && phoneQueue.length) {
       const job = phoneQueue.shift();
       phoneQueued.delete(job.key);
+      if (phoneReady.has(job.key) || phoneLive.has(job.key)) continue;
       phoneActive += 1;
       const image = new Image();
+      image.alt = "";
+      image.decoding = "async";
+      phoneBinEl().appendChild(image);
+      const live = { image, timer: 0, cancel: false };
       let settled = false;
       const finish = (ok) => {
         if (settled) return;
         settled = true;
-        window.clearTimeout(timer);
+        window.clearTimeout(live.timer);
+        phoneLive.delete(job.key);
         image.onload = null;
         image.onerror = null;
         phoneActive -= 1;
-        if (ok && image.naturalWidth > 0) phoneReady.add(job.key);
-        else {
+        if (live.cancel) {
           image.src = "";
+          image.remove();
+        }
+        else if (ok && image.naturalWidth > 0) {
+          phoneReady.add(job.key);
+          phoneKept.push(image);
+          while (phoneKept.length > 12) phoneKept.shift().remove();
+        } else {
+          image.remove();
           phoneFailed.add(job.key);
         }
-        emitPhone();
-        if (ok) scheduleRepaint();
+        if (!live.cancel) {
+          emitPhone();
+          if (ok) scheduleRepaint();
+        }
         pumpPhone();
       };
-      const timer = window.setTimeout(() => {
-        image.onload = null;
-        image.onerror = null;
-        image.src = "";
-        finish(false);
-      }, PHONE_TIMEOUT_MS);
+      live.finish = finish;
+      live.timer = window.setTimeout(() => finish(false), PHONE_TIMEOUT_MS);
+      phoneLive.set(job.key, live);
       image.onload = () => finish(true);
       image.onerror = () => finish(false);
       image.src = crispUrl(job.id, job.index);
+    }
+  }
+
+  // A flick moves the playhead faster than the first frames can arrive. Those
+  // early downloads were holding every connection, so the frame under the
+  // finger never started and the picture sat still.
+  function releaseFarPhone(id, index) {
+    const stuck = [];
+    for (const [key, live] of phoneLive) {
+      const cut = key.lastIndexOf("/");
+      const reel = key.slice(0, cut);
+      const frame = Number(key.slice(cut + 1));
+      if (reel === id && Math.abs(frame - index) <= 24) continue;
+      stuck.push(live);
+    }
+    for (const live of stuck) {
+      live.cancel = true;
+      live.finish(false);
     }
   }
 
@@ -171,7 +215,6 @@
     stageBack = make();
   }
 
-  let stageBusy = false;
   let stageWant = "";
 
   function coverPoster(id) {
@@ -188,6 +231,7 @@
       if (index + step < total) wantPhone(id, index + step, step);
       if (step && index - step >= 0) wantPhone(id, index - step, 6 + step);
     }
+    releaseFarPhone(id, index);
     let frame = nearestPhone(id, index);
     if (frame < 0) return;
     const currentMark = stageFront.dataset.shown || "";
@@ -196,7 +240,6 @@
     // A frame already on screen that is closer to the scroll than anything
     // downloaded stays there. Replacing it with an older frame is a jump.
     if (Number.isFinite(currentIndex) && Math.abs(currentIndex - index) <= Math.abs(frame - index)) frame = currentIndex;
-    markGrade(id);
     const url = crispUrl(id, frame);
     const mark = `${id}/${frame}`;
     stageWant = mark;
@@ -205,36 +248,31 @@
     if (stageFront.dataset.shown === mark) {
       if (placeStage(id)) {
         stageFront.style.visibility = "visible";
-        if (!stageBusy) stageBack.style.visibility = "hidden";
+        stageBack.style.visibility = "hidden";
         coverPoster(id);
       }
       return;
     }
-    if (stageBusy) return;
     const absolute = new URL(url, document.baseURI).href;
-    if (stageBack.dataset.pending === absolute) return;
-    stageBack.dataset.pending = absolute;
-    stageBusy = true;
+    if (stageBack.dataset.pending === absolute && stageBack.dataset.token) {
+      placeStage(id);
+      return;
+    }
+    // Retarget immediately. Waiting out a decode() here is what froze the
+    // picture for a whole flick: on iPhone that call never settles, and the
+    // timers that used to unblock it do not run while a finger is down.
     const token = String(++stageToken);
+    stageBack.dataset.pending = absolute;
     stageBack.dataset.token = token;
-    const finish = () => {
-      stageBusy = false;
-      if (!stageWant || stageWant === (stageFront && stageFront.dataset.shown)) return;
-      const cut = stageWant.lastIndexOf("/");
-      presentPhone(stageWant.slice(0, cut), Number(stageWant.slice(cut + 1)));
-    };
     const reveal = () => {
-      if (stageBack.dataset.token !== token || !stageBack.naturalWidth) {
-        stageBusy = false;
-        return;
-      }
+      if (stageBack.dataset.token !== token || !stageBack.naturalWidth) return;
       if (!placeStage(id)) {
         stageBack.dataset.pending = "";
-        stageBusy = false;
         return;
       }
       stageBack.dataset.shown = mark;
       stageBack.dataset.reel = id;
+      stageBack.classList.toggle("is-shot1-grade", !!GRADED[id]);
       stageBack.style.zIndex = "1";
       stageFront.style.zIndex = "1";
       stageBack.style.visibility = "visible";
@@ -242,49 +280,33 @@
       document.documentElement.classList.add("has-film-stage");
       const incoming = stageBack;
       const outgoing = stageFront;
-      // iOS pauses animation frames while a finger is down, and decode() on a
-      // hidden image can fail to settle. Either one would leave the picture
-      // stuck, so the handoff also runs from a short timer.
-      let handed = false;
-      const handoff = () => {
-        if (handed) return;
-        handed = true;
-        if (incoming.dataset.token !== token) {
-          finish();
-          return;
-        }
-        outgoing.style.visibility = "hidden";
-        outgoing.style.zIndex = "1";
-        stageFront = incoming;
-        stageBack = outgoing;
-        stageBack.dataset.pending = "";
-        stageBack.style.zIndex = "1";
-        painted.set(id, mark);
-        shown.set(id, frame);
-        finish();
-      };
-      requestAnimationFrame(handoff);
-      window.setTimeout(handoff, 64);
-    };
-    const ready = () => {
-      if (stageBack.dataset.token !== token) return;
-      let started = false;
-      const start = () => {
-        if (started || stageBack.dataset.token !== token) return;
-        started = true;
-        reveal();
-      };
-      if (typeof stageBack.decode === "function") stageBack.decode().then(start, start);
-      else start();
-      window.setTimeout(start, 100);
-    };
-    stageBack.onload = ready;
-    stageBack.onerror = () => {
+      outgoing.style.visibility = "hidden";
+      outgoing.classList.remove("is-shot1-grade");
+      outgoing.style.zIndex = "1";
+      stageFront = incoming;
+      stageBack = outgoing;
       stageBack.dataset.pending = "";
-      stageBusy = false;
+      stageBack.style.zIndex = "1";
+      painted.set(id, mark);
+      shown.set(id, frame);
+      if (!stageWant || stageWant === mark) return;
+      const cut = stageWant.lastIndexOf("/");
+      const nextId = stageWant.slice(0, cut);
+      const nextIndex = Number(stageWant.slice(cut + 1));
+      window.setTimeout(() => presentPhone(nextId, nextIndex), 0);
     };
+    stageBack.onload = () => {
+      if (stageBack.dataset.token !== token) return;
+      reveal();
+    };
+    stageBack.onerror = () => {
+      if (stageBack.dataset.token !== token) return;
+      stageBack.dataset.pending = "";
+    };
+    // A filtered image keeps the previous pixels when its src changes on iOS.
+    stageBack.classList.remove("is-shot1-grade");
     if (stageBack.src === absolute && stageBack.complete && stageBack.naturalWidth) {
-      ready();
+      reveal();
       return;
     }
     stageBack.src = absolute;
@@ -722,18 +744,19 @@
     }
     stageMiss = 0;
     // The picture lives inside this shot, under the shade and the captions.
-    // A layer on the screen itself covered the type and the next section.
+    // Writing a new top and height on every scroll sample is what made iOS
+    // drop the sticky and slide the film over the next section.
     for (const node of nodes) {
       if (node.parentElement !== sticky) sticky.appendChild(node);
-    }
-    const band = filmBand({ left: 0, top: 0, width: stickyRect.width, height: stickyRect.height });
-    for (const node of nodes) {
-      node.style.left = `${band.left}px`;
-      node.style.top = `${band.top}px`;
-      node.style.width = `${band.width}px`;
-      node.style.height = `${band.height}px`;
-      node.style.right = "auto";
-      node.style.bottom = "auto";
+      if (node.style.left || node.style.width) {
+        node.style.left = "";
+        node.style.top = "";
+        node.style.width = "";
+        node.style.height = "";
+        node.style.right = "";
+        node.style.bottom = "";
+        node.style.transform = "";
+      }
       node.style.zIndex = "1";
     }
     return true;
@@ -948,11 +971,9 @@
       presentPhone(id, index);
       if (id !== activeReel) {
         activeReel = id;
-        const total = countOf(id);
-        for (let frame = 0; frame < total; frame += 1) wantPhone(id, frame, 20 + frame);
         const next = order[order.indexOf(id) + 1];
-        const head = next ? Math.min(24, countOf(next)) : 0;
-        for (let frame = 0; frame < head; frame += 1) wantPhone(next, frame, 60 + frame);
+        const head = next ? Math.min(12, countOf(next)) : 0;
+        for (let frame = 0; frame < head; frame += 1) wantPhone(next, frame, 40 + frame);
       }
       return;
     }

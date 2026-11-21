@@ -114,7 +114,6 @@ body {
   overscroll-behavior: none;
   overflow-anchor: none;
   touch-action: pan-y;
-  -webkit-overflow-scrolling: touch;
 }
 
 img {
@@ -1290,7 +1289,7 @@ h2 {
   }
 
   .footer {
-    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
+    padding-bottom: calc(8.5rem + env(safe-area-inset-bottom));
   }
 }
 
@@ -1539,7 +1538,17 @@ h2 {
   }
 
   html:not(.force-landscape) .film-stage {
+    left: 50%;
+    right: auto;
+    top: 50%;
+    bottom: auto;
+    width: min(100%, calc(var(--screen-h) * 16 / 9));
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: 100%;
+    transform: translate(-50%, -50%);
     object-fit: contain;
+    object-position: center center;
   }
 }
 
@@ -2221,7 +2230,9 @@ html.is-booting .scroller {
 }
 
 img.film-stage.is-shot1-grade {
-  filter: url("#shot-crisp");
+  /* The sharpen kernel on #shot-crisp keeps the previous pixels when the
+     source changes, so a phone stays on one frame. The tone curve does not. */
+  filter: url("#shot1-blacks");
 }
 
 html.has-film-stage canvas.shot-frame {
